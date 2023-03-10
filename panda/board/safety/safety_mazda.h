@@ -96,7 +96,7 @@ static int mazda_rx_hook(CANPacket_t *to_push) {
     }
   }
   
-  if valid && (GET_BUS(to_push) == MAZDA_CAM) {
+  if (valid && (GET_BUS(to_push) == MAZDA_CAM)) {
     int addr = GET_ADDR(to_push);
     // enter controls on rising edge of ACC, exit controls on ACC off
     if (addr == MAZDA_CRZ_CTRL) {
