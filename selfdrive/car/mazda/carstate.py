@@ -244,7 +244,7 @@ class CarState(CarStateBase):
           ("CRZ_AVAILABLE", "CRZ_CTRL"),
         ]
         checks+= [
-          {"CRZ_CTRL", 50},
+          ("CRZ_CTRL", 50),
         ]
 
       checks += [
