@@ -188,7 +188,7 @@ class CarState(CarStateBase):
           ("CRZ_AVAILABLE", "CRZ_CTRL"),
         ]
         checks += [
-          ("CRZ_CTRL", 50)
+          ("CRZ_CTRL", 50),
         ]
         
     # get real driver torque if we are using a torque interceptor
@@ -243,7 +243,7 @@ class CarState(CarStateBase):
           ("CRZ_ACTIVE", "CRZ_CTRL"),
           ("CRZ_AVAILABLE", "CRZ_CTRL"),
         ]
-        checks+= [
+        checks += [
           ("CRZ_CTRL", 50),
         ]
 
