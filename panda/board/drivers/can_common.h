@@ -227,6 +227,14 @@ void ignition_can_hook(CANPacket_t *to_push) {
       ignition_can_cnt = 0U;
     }
 
+  } else if (bus == 2) {
+    // GEN2 Mazda exception
+    if((addr == 0x211) && (len == 8)) {
+      ignition_can = (GET_BYTE(to_push, 6) & 0x2U) == 0U;
+      ignition_can_cnt = 0U;
+    }
+  } else {
+    // do nothing MISRA 
   }
 }
 

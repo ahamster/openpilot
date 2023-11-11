@@ -30,6 +30,7 @@ struct __attribute__((packed)) health_t {
   uint16_t sbu1_voltage_mV;
   uint16_t sbu2_voltage_mV;
   uint8_t som_reset_triggered;
+  uint8_t torque_interceptor_detected_pkt;
 };
 
 #define CAN_HEALTH_PACKET_VERSION 5
