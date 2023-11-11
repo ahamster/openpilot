@@ -201,7 +201,7 @@ class LatControlTorque(LatControl):
         if self.nn_friction_override:
           pid_log.error += self.torque_from_lateral_accel(0.0, self.torque_params,
                                             friction_input,
-                                            lateral_accel_deadzone, friction_compensation=True)
+                                            lateral_accel_deadzone, 0.0, 0.0, friction_compensation=True)
         nn_log = nn_input + nnff_setpoint_input + nnff_measurement_input
       else:
         gravity_adjusted_lateral_accel = desired_lateral_accel - params.roll * ACCELERATION_DUE_TO_GRAVITY

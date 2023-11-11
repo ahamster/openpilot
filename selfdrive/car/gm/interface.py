@@ -51,7 +51,7 @@ class CarInterface(CarInterfaceBase):
       return CarInterfaceBase.get_steer_feedforward_default
 
   def torque_from_lateral_accel_siglin(self, lateral_accel_value: float, torque_params: car.CarParams.LateralTorqueTuning,
-                                       lateral_accel_error: float, lateral_accel_deadzone: float, friction_compensation: bool) -> float:
+                                       lateral_accel_error: float, lateral_accel_deadzone: float, _: float, __: float, friction_compensation: bool) -> float:
     friction = get_friction(lateral_accel_error, lateral_accel_deadzone, FRICTION_THRESHOLD, torque_params, friction_compensation)
 
     def sig(val):
