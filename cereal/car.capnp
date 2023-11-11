@@ -447,6 +447,7 @@ struct CarParams {
   enableBsm @56 :Bool;       # blind spot monitoring
   flags @64 :UInt32;         # flags for car specific quirks
   experimentalLongitudinalAvailable @71 :Bool;
+  enableTorqueInterceptor @73 :Bool;
 
   minEnableSpeed @7 :Float32;
   minSteerSpeed @8 :Float32;
@@ -538,6 +539,7 @@ struct CarParams {
     latAccelOffset @7 :Float32;
     nnModelName @8 :Text;
     nnModelFuzzyMatch @9 :Bool;
+    latAngleFactor @10 :Float32;
   }
 
   struct LongitudinalPIDTuning {
@@ -611,6 +613,7 @@ struct CarParams {
     body @27;
     hyundaiCanfd @28;
     volkswagenMqbEvo @29;
+    mazda2019 @30;
   }
 
   enum SteerControlType {
