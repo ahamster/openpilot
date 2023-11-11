@@ -17,6 +17,7 @@ import openpilot.selfdrive.sentry as sentry
 from openpilot.selfdrive.car import gen_empty_fingerprint
 
 FRAME_FINGERPRINT = 100  # 1s
+from openpilot.selfdrive.global_ti import TI
 
 EventName = car.CarEvent.EventName
 
@@ -25,7 +26,7 @@ def get_startup_event(car_recognized, controller_available, fw_seen):
   if is_comma_remote() and is_tested_branch():
     event = EventName.startup
   else:
-    event = EventName.startupMaster
+    event = EventName.startup
 
   if not car_recognized:
     if fw_seen:
@@ -191,6 +192,8 @@ def fingerprint(logcan, sendcan, num_pandas):
   cloudlog.event("fingerprinted", car_fingerprint=car_fingerprint, source=source, fuzzy=not exact_match, cached=cached,
                  fw_count=len(car_fw), ecu_responses=list(ecu_rx_addrs), vin_rx_addr=vin_rx_addr, fingerprints=finger,
                  fw_query_time=fw_query_time, error=True)
+  TI.saved_candidate = car_fingerprint
+  TI.saved_finger = finger
   return car_fingerprint, finger, vin, car_fw, source, exact_match
 
 def format_params(params):
@@ -267,5 +270,13 @@ def get_car(logcan, sendcan, experimental_long_allowed, num_pandas=1):
   CP.carFw = car_fw
   CP.fingerprintSource = source
   CP.fuzzyFingerprint = not exact_match
+  
+  TI.saved_CarInterface = CarInterface
 
   return CarInterface(CP, CarController, CarState), CP
+
+def get_ti():
+  print("get_ti, entering get_params")
+  car_params = TI.saved_CarInterface.get_params(TI.saved_candidate, TI.saved_finger, list(), False, False)
+
+  return car_params

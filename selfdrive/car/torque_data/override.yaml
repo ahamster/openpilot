@@ -64,6 +64,14 @@ HYUNDAI AZERA HYBRID 6TH GEN: [1.8, 1.8, 0.1]
 KIA K8 HYBRID 1ST GEN: [2.5, 2.5, 0.1]
 HYUNDAI CUSTIN 1ST GEN: [2.5, 2.5, 0.1]
 
+MAZDA 3 2019: [1.45, 3.0, .33]
+MAZDA CX-30: [1.45, 3.0, .33]
+MAZDA CX-50: [1.45, 3.0, .33]
+MAZDA CX-60: [1.45, 3.0, .33]
+MAZDA CX-70: [1.45, 3.0, .33]
+MAZDA CX-80: [1.45, 3.0, .33]
+MAZDA CX-90: [1.45, 3.0, .33]
+
 # Dashcam or fallback configured as ideal car
 mock: [10.0, 10, 0.0]
 
