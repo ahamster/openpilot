@@ -1,6 +1,7 @@
 #include <filesystem>
 
 #include "selfdrive/ui/qt/offroad/frogpilot_settings.h"
+#include "selfdrive/ui/qt/offroad/cars/allCars.h"
 
 FrogPilotControlsPanel::FrogPilotControlsPanel(QWidget *parent) : FrogPilotPanel(parent) {
   setParams();
@@ -122,66 +123,116 @@ FrogPilotControlsPanel::FrogPilotControlsPanel(QWidget *parent) : FrogPilotPanel
   setInitialToggleStates();
 }
 
+FrogPilotVehicleSelectionPanel::FrogPilotVehicleSelectionPanel(QWidget *parent) : ListWidget(parent) {
+  std::transform(vehicleMap.begin(), vehicleMap.end(), std::back_inserter(brands),
+                 [](const auto& pair) { return pair.first; });
+  brandSelectBtn = new ButtonControl(tr("Select Brand"), tr("SELECT"));
+  modelSelectBtn = new ButtonControl(tr("Select Model"), tr("SELECT"));
+  addItem(brandSelectBtn);
+  addItem(modelSelectBtn);
+  setupConnections();
+  updateInitialSelection();
+}
+
+void FrogPilotVehicleSelectionPanel::setupConnections () {
+  connect(brandSelectBtn, &ButtonControl::clicked, [=]() {
+    selectedBrand = MultiOptionDialog::getSelection(tr("Select a brand"), brands, selectedBrand, this);
+    if (!selectedBrand.isEmpty()) {
+      models.clear(); // Clear existing models
+      models = QStringList::fromVector(vehicleMap[selectedBrand]);
+      brandSelectBtn->setValue(selectedBrand); // Update button text with selected brand
+      modelSelectBtn->setValue("");
+      selectedModel = "";
+      Params().put("CarFingerprint", "");
+      modelSelectBtn->setEnabled(true);
+      emit this->brandChanged();
+    }
+  });
+
+  connect(modelSelectBtn, &ButtonControl::clicked, [=]() {
+    selectedModel = MultiOptionDialog::getSelection(tr("Select a model"), models, selectedModel, this);
+    if (!selectedModel.isEmpty()) {
+      Params().put("CarFingerprint", selectedModel.toStdString());
+      modelSelectBtn->setValue(selectedModel);
+    }
+  });  
+}
+
+void FrogPilotVehicleSelectionPanel::updateInitialSelection() {
+  selectedModel = QString::fromStdString(Params().get("CarFingerprint"));
+  selectedBrand = findBrandForModel(selectedModel);
+  models = QStringList::fromVector(vehicleMap[selectedBrand]);
+  updateButtonVisibilityAndValues();
+}
+
+QString FrogPilotVehicleSelectionPanel::findBrandForModel(const QString& model) {
+  for (const auto& brand : vehicleMap) {
+    if (std::find(brand.second.begin(), brand.second.end(), model) != brand.second.end()) {
+      return brand.first;
+    }
+  }
+  return QString();
+}
+void FrogPilotVehicleSelectionPanel::updateButtonVisibilityAndValues() {
+  bool modelSelected = !selectedBrand.isEmpty();
+  brandSelectBtn->setValue(modelSelected ? selectedBrand : "");
+  modelSelectBtn->setValue(modelSelected ? selectedModel : "");
+  modelSelectBtn->setEnabled(modelSelected);
+}
+
+void FrogPilotVehicleSelectionPanel::onBrandSelected(const QString &brand) {
+  models.clear(); // Clear existing models
+  models = QStringList::fromVector(vehicleMap[brand]);
+  brandSelectBtn->setValue(brand); // Update button text with selected brand
+  modelSelectBtn->setValue("");
+  selectedModel = "";
+  Params().put("CarFingerprint", "");
+  modelSelectBtn->setEnabled(true);
+}
+
 FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(QWidget *parent) : FrogPilotPanel(parent) {
   mainLayout = new QVBoxLayout(this);
+  carSelector = new FrogPilotVehicleSelectionPanel(this);
+  QHBoxLayout *brandLabelLayout = new QHBoxLayout();
+  iconLabel = new QLabel(this); // brand icon
+  textLabel = new QLabel(this); // brand name
+  controlList = new ListWidget; // holds the brand specific toggles
 
-  QHBoxLayout *gmLayout = new QHBoxLayout();
-  gmLayout->setSpacing(25);
-  gmLayout->setContentsMargins(0, 0, 0, 0);
-
-  QLabel *gmIconLabel = new QLabel(this);
-  gmIconLabel->setPixmap(QPixmap("../assets/offroad/icon_gm.png").scaledToWidth(80, Qt::SmoothTransformation));
-
-  QLabel *gmTextLabel = new QLabel("GM", this);
-
-  gmLayout->addWidget(gmIconLabel);
-  gmLayout->addWidget(gmTextLabel);
-  gmLayout->addStretch(1);
-  mainLayout->addLayout(gmLayout);
-  mainLayout->addWidget(whiteHorizontalLine());
-
-  static const std::vector<std::tuple<QString, QString, QString, QString>> gmToggles = {
-    {"EVTable", "EV Lookup Tables", "Smoothens out the gas and brake controls for EV vehicles.", "../assets/offroad/icon_blank.png"},
-    {"LowerVolt", "Lower Volt Enable Speed", "Lowers the Volt's minimum enable speed in order to enable openpilot at any speed.", "../assets/offroad/icon_blank.png"}
-  };
-
-  for (const auto &[key, label, desc, icon] : gmToggles) {
-    ParamControl *control = createParamControl(key, label, desc, icon, this);
-    mainLayout->addWidget(control);
-    if (key != std::get<0>(gmToggles.back())) mainLayout->addWidget(horizontalLine());
-  }
-
-  mainLayout->addWidget(whiteHorizontalLine());
-  mainLayout->setSpacing(25);
-  QHBoxLayout *toyotaLayout = new QHBoxLayout();
-  toyotaLayout->addWidget(whiteHorizontalLine());
-  toyotaLayout->setSpacing(25);
-  toyotaLayout->setContentsMargins(0, 0, 0, 0);
-
-  QLabel *toyotaIconLabel = new QLabel(this);
-  toyotaIconLabel->setPixmap(QPixmap("../assets/offroad/icon_toyota.png").scaledToWidth(80, Qt::SmoothTransformation));
-
-  QLabel *toyotaTextLabel = new QLabel("Toyota", this);
-
-  toyotaLayout->addWidget(toyotaIconLabel);
-  toyotaLayout->addWidget(toyotaTextLabel);
-  toyotaLayout->addStretch(1);
-  mainLayout->addLayout(toyotaLayout);
-  mainLayout->addWidget(whiteHorizontalLine());
-
-  static const std::vector<std::tuple<QString, QString, QString, QString>> toyotaToggles = {
-    {"LockDoors", "Lock Doors In Drive", "Automatically locks the doors when in drive and unlocks when in park.", "../assets/offroad/icon_blank.png"},
-    {"SNGHack", "SNG Hack", "Enable the SNG Hack for vehicles without stock stop and go.", "../assets/offroad/icon_blank.png"},
-    {"TSS2Tune", "TSS2 Tune", "Tuning profile for TSS2 vehicles. Based on the tuning profile from DragonPilot.", "../assets/offroad/icon_blank.png"}
-  };
-
-  for (const auto &[key, label, desc, icon] : toyotaToggles) {
-    ParamControl *control = createParamControl(key, label, desc, icon, this);
-    mainLayout->addWidget(control);
-    if (key != std::get<0>(toyotaToggles.back())) mainLayout->addWidget(horizontalLine());
-  }
-
+  carSelector->setMaximumHeight(270); // Is there a better way to squish this?
+  mainLayout->addWidget(carSelector); // Select brand and model
+  line = whiteHorizontalLine();
+  mainLayout->addWidget(line); // only visible if there are toggles
+  brandLabelLayout->addWidget(iconLabel); 
+  brandLabelLayout->addWidget(textLabel); 
+  brandLabelLayout->addStretch(); // push labels to the left
+  mainLayout->addLayout(brandLabelLayout);
+  mainLayout->addWidget(controlList);
+  connect(carSelector, &FrogPilotVehicleSelectionPanel::brandChanged, this, &FrogPilotVehiclesPanel::updateVehicleSection);
+  updateVehicleSection();
   setInitialToggleStates();
+}
+
+void FrogPilotVehiclesPanel::updateVehicleSection() {
+  current = BrandParams{};
+  for (const auto& brandParams : allBrandParams) {
+    if (brandParams.brandName == carSelector->selectedBrand){
+      current = brandParams;
+      break;
+    }
+  }
+  for (auto *control : brandParamControls) {
+    delete control;
+  }
+  brandParamControls.clear();
+  for (size_t i = 0; i < current.brandToggles.size(); ++i) {
+    const auto &[key, label, desc, icon] = current.brandToggles[i];
+    ParamControl *control = createParamControl(key, label, desc, icon, this);
+    controlList->addItem(control);
+    brandParamControls.push_back(control); // Store the control for future updates
+  }
+  line->setVisible(brandParamControls.size());
+  iconLabel->setPixmap(QPixmap(current.brandIconPath).scaledToWidth(80, Qt::SmoothTransformation));
+  textLabel->setText(current.brandName);
 }
 
 FrogPilotVisualsPanel::FrogPilotVisualsPanel(QWidget *parent) : FrogPilotPanel(parent) {

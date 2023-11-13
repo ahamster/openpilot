@@ -113,3 +113,6 @@ class CarControllerParams:
 
   def __init__(self, CP):
     pass
+
+if __name__ == "__main__":
+  print("\n".join(v for m, v in vars(CAR).items() if not m.startswith("_")))

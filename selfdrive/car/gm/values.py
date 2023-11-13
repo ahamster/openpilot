@@ -379,3 +379,6 @@ CAMERA_ACC_CAR = {CAR.BOLT_EUV, CAR.SILVERADO, CAR.EQUINOX, CAR.TRAILBLAZER}
 CAMERA_ACC_CAR.update({CAR.VOLT_CC, CAR.BOLT_CC, CAR.EQUINOX_CC, CAR.YUKON_CC, CAR.CT6_CC})
 
 STEER_THRESHOLD = 1.0
+
+if __name__ == "__main__":
+  print("\n".join(v for m, v in vars(CAR).items() if not m.startswith("_")))

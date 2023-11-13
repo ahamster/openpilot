@@ -82,6 +82,10 @@ function launch {
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
 
+  for brand in chrysler ford gm honda hyundai mazda nissan subaru tesla toyota volkswagen; do
+    python ./selfdrive/car/${brand}/values.py > ./selfdrive/ui/qt/offroad/cars/${brand}
+  done
+  python ./selfdrive/ui/qt/offroad/cars/force_car_fingerprint.py
   # start manager
   cd selfdrive/manager
   ./build.py && ./manager.py

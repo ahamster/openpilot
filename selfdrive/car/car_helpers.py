@@ -127,6 +127,11 @@ def fingerprint(logcan, sendcan, num_pandas):
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
   ecu_rx_addrs = set()
   params = Params()
+  try:
+    fixed_fingerprint = params.get("CarFingerprint").decode("utf-8") if not fixed_fingerprint else ""
+  except: # Catch NoneType decode() AttributeError
+    pass
+  
 
   start_time = time.monotonic()
   if not skip_fw_query:
@@ -261,6 +266,9 @@ def get_car(logcan, sendcan, experimental_long_allowed, num_pandas=1):
 
   if get_branch() == "origin/FrogPilot-Development" and dongle_id[:3] != "be6":
     candidate = "mock"
+    
+  if not Params().get("CarFingerprint"): # check if its overridden by the ui already
+    Params().put("CarFingerprint", candidate)
 
   crash_log(candidate)
 

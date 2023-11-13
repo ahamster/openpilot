@@ -388,3 +388,6 @@ DBC = {
   CAR.RAM_1500: dbc_dict('chrysler_ram_dt_generated', None),
   CAR.RAM_HD: dbc_dict('chrysler_ram_hd_generated', None),
 }
+
+if __name__ == "__main__":
+  print("\n".join(v for m, v in vars(CAR).items() if not m.startswith("_")))

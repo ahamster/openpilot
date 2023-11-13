@@ -331,6 +331,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"TwilsoncoSSH", PERSISTENT},
     {"UnlimitedLength", PERSISTENT},
     {"Updated", PERSISTENT},
+    {"CarFingerprint", PERSISTENT},
     {"VisionTurnControl", PERSISTENT},
     {"WheelIcon", PERSISTENT},
     {"WideCamera", PERSISTENT},

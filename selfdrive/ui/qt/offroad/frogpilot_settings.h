@@ -140,11 +140,60 @@ public:
   explicit FrogPilotControlsPanel(QWidget *parent = nullptr);
 };
 
+class FrogPilotVehicleSelectionPanel : public ListWidget {
+  Q_OBJECT
+
+public:
+  explicit FrogPilotVehicleSelectionPanel(QWidget *parent = nullptr);
+  QString selectedBrand;
+  QString selectedModel;
+
+signals:
+  void brandChanged();
+
+private:
+  void onBrandSelected(const QString &brand);
+  void updateInitialSelection();
+  void updateButtonVisibilityAndValues();
+  QString findBrandForModel(const QString& model);
+  void setupConnections();
+  ButtonControl *brandSelectBtn;
+  ButtonControl *modelSelectBtn;
+  QStringList models;
+  QStringList brands;
+};
+
 class FrogPilotVehiclesPanel : public FrogPilotPanel {
   Q_OBJECT
 
 public:
   explicit FrogPilotVehiclesPanel(QWidget *parent = nullptr);
+
+private:
+  void updateVehicleSection();
+  struct BrandParams {
+    QString brandName;
+    QString brandIconPath;
+    std::vector<std::tuple<QString, QString, QString, QString>> brandToggles;
+  };
+  std::vector<BrandParams> allBrandParams = {
+    {"Gm", "../assets/offroad/icon_gm.png", {
+      {"EVTable", "EV Lookup Tables", "Smoothens out the gas and brake controls for EV vehicles.", "../assets/offroad/icon_blank.png"},
+      {"LowerVolt", "Lower Volt Enable Speed", "Lowers the Volt's minimum enable speed in order to enable openpilot at any speed.", "../assets/offroad/icon_blank.png"}
+    }},
+    {"Toyota", "../assets/offroad/icon_toyota.png", {
+      {"LockDoors", "Lock Doors In Drive", "Automatically locks the doors when in drive and unlocks when in park.", "../assets/offroad/icon_blank.png"},
+      {"SNGHack", "SNG Hack", "Enable the SNG Hack for vehicles without stock stop and go.", "../assets/offroad/icon_blank.png"},
+      {"TSS2Tune", "TSS2 Tune", "Tuning profile for TSS2 vehicles. Based on the tuning profile from DragonPilot.", "../assets/offroad/icon_blank.png"}
+    }}
+  };
+  BrandParams current;
+  FrogPilotVehicleSelectionPanel *carSelector;
+  std::vector<ParamControl*> brandParamControls;
+  ListWidget *controlList;
+  QLabel *iconLabel;
+  QLabel *textLabel;
+  QFrame *line;
 };
 
 class FrogPilotVisualsPanel : public FrogPilotPanel {

@@ -200,3 +200,6 @@ DBC = {
   CAR.ROGUE: dbc_dict('nissan_x_trail_2017_generated', None),
   CAR.ALTIMA: dbc_dict('nissan_x_trail_2017_generated', None),
 }
+
+if __name__ == "__main__":
+  print("\n".join(v for m, v in vars(CAR).items() if not m.startswith("_")))
