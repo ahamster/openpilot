@@ -154,8 +154,8 @@ class CarState(CarStateBase):
 
     # TODO: the signal used for available seems to be the adaptive cruise signal, instead of the main on
     #       it should be used for carState.cruiseState.nonAdaptive instead
-    ret.cruiseState.available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
-    ret.cruiseState.enabled = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
+    ret.cruiseState.available = cp_cam.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
+    ret.cruiseState.enabled = cp_cam.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
     ret.cruiseState.standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
     ret.cruiseState.speed = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"] * CV.KPH_TO_MS
 
@@ -211,7 +211,6 @@ class CarState(CarStateBase):
       messages += CarState.get_ti_messages(CP)
       messages += [
         ("ENGINE_DATA", 100),
-        ("CRZ_CTRL", 50),
         ("CRZ_EVENTS", 50),
         ("CRZ_BTNS", 10),
         ("PEDALS", 50),
@@ -230,6 +229,11 @@ class CarState(CarStateBase):
         ("ACC", 50),
         ("CRZ_BTNS", 10),
         ("SYSTEM_SETTINGS", 10),
+      ]
+
+    if False:
+      messages += [
+        ("CRZ_CTRL", 50),
       ]
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, 0)
@@ -253,6 +257,11 @@ class CarState(CarStateBase):
         ("WHEEL_SPEEDS", 100),
         ("STEER", 100),
         ("SPEED", 50),
+      ]
+
+    if True:
+      messages += [
+        ("CRZ_CTRL", 50),
       ]
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, 2)
