@@ -65,8 +65,8 @@ unsigned int chrysler_checksum(uint32_t address, const Signal &sig, const std::v
 }
 
 unsigned int mazda_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
-    unsigned int sum = 0;
-    for (int i = 0; i < 7; i++) {
+    uint8_t sum = 0;
+    for (int i = 0; i < d.size() - 1; i++) {
         sum += d[i];
     }
     return ~sum & 0xFF;
