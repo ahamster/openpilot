@@ -78,6 +78,10 @@ def manager_init() -> None:
   params.put("GitBranch", get_short_branch(default=""))
   params.put("GitRemote", get_origin(default=""))
   params.put_bool("IsTestedBranch", is_tested_branch())
+  
+  if params.get("ConnectVersion", encoding="utf8") != "MoreTorqueV1":
+    params.remove("DongleId")
+    params.put("ConnectVersion", "MoreTorqueV1")
 
   # set dongle id
   reg_res = register(show_spinner=True)

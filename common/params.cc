@@ -97,6 +97,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"CarParamsPersistent", PERSISTENT},
     {"CarVin", CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON},
     {"CompletedTrainingVersion", PERSISTENT},
+     {"ConnectVersion", PERSISTENT},
     {"ControlsReady", CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON},
     {"CurrentRoute", CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON},
     {"DashcamOverride", PERSISTENT},
