@@ -110,8 +110,8 @@ class CarController(CarControllerBase):
       self.mrcc_resync.note_engaged_by_driver()
     self.hybrid_engaged_prev = engaged
 
-    want = self.hybrid_arbiter.update(self.hybrid_radar.emulating, engaged, self.hybrid_experimental, CS.out.standstill,
-                                      CS.out.brakePressed, CS.out.gasPressed, CS.out.vEgo, CC.actuators.accel)
+    want = self.hybrid_arbiter.update(self.hybrid_radar.emulating, engaged, CC.longActive, self.hybrid_experimental,
+                                      CS.out.standstill, CS.out.brakePressed, CS.out.gasPressed, CS.out.vEgo, CC.actuators.accel)
     fsc_ok = CS.fsc_settled or bool(self.CP.flags & MazdaSafetyFlags.NO_FSC)
     self.hybrid_radar.update(want, witness, CS.out.canValid, fsc_ok)
     if self.hybrid_radar.diagnostic is not None:

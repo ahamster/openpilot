@@ -178,7 +178,7 @@ class HybridArbiter:
     # driving again. Until the driver re-engages, openpilot keeps the radar.
     self.mrcc_unavailable = False
 
-  def desired(self, emulating: bool, engaged: bool, experimental: bool, standstill: bool,
+  def desired(self, emulating: bool, engaged: bool, long_active: bool, experimental: bool, standstill: bool,
               brake_pressed: bool, gas_pressed: bool, v_ego: float, accel: float) -> bool:
     if not engaged:
       # Not using ACC: give the car its own radar back, and with it factory AEB and SCBS.
@@ -192,13 +192,17 @@ class HybridArbiter:
         return True
       # Standard mode: back to MRCC, unless openpilot is braking or MRCC could not be set again.
       return v_ego < self.HANDBACK_MIN_SPEED or accel < self.HANDBACK_MAX_DECEL
-    return ((experimental or self.mrcc_unavailable) and v_ego > self.TAKEOVER_MIN_SPEED and
+    # Only take the radar when openpilot is actually going to command gas and brake. CC.enabled
+    # with longActive false (the gas pedal, a paused longitudinal, an ECU-disable failure) would
+    # silence the radar and then send it standby frames: the car loses its ACC master for nothing,
+    # drops cruise, and that counts as a rejected takeover for the rest of the drive.
+    return ((experimental or self.mrcc_unavailable) and long_active and v_ego > self.TAKEOVER_MIN_SPEED and
             not brake_pressed and not gas_pressed and not self.takeover_rejected)
 
   def note_takeover(self) -> None:
     self.takeover_watch_frames = self.TAKEOVER_WATCH_FRAMES
 
-  def update(self, emulating: bool, engaged: bool, experimental: bool, standstill: bool,
+  def update(self, emulating: bool, engaged: bool, long_active: bool, experimental: bool, standstill: bool,
              brake_pressed: bool, gas_pressed: bool, v_ego: float, accel: float) -> bool:
     if self.takeover_watch_frames > 0:
       self.takeover_watch_frames -= 1
@@ -211,7 +215,7 @@ class HybridArbiter:
     self.engaged_prev = engaged
 
     self.frames_since_switch += 1
-    want = self.desired(emulating, engaged, experimental, standstill, brake_pressed, gas_pressed, v_ego, accel)
+    want = self.desired(emulating, engaged, long_active, experimental, standstill, brake_pressed, gas_pressed, v_ego, accel)
     if want == self.want_emulation:
       self.pending_frames = 0
       return self.want_emulation
