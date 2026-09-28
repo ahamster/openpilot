@@ -1,6 +1,6 @@
 from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
-from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_ti_steer_torque_limits
+from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.longitudinal import CAM_BUS, LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, \
@@ -68,8 +68,13 @@ class CarController(CarControllerBase):
                                                       CS.out.steeringTorque, self.ccp)
       if self.CP.flags & MazdaSafetyFlags.TORQUE_INTERCEPTOR:
         if CS.ti_lkas_allowed:
-          ti_new_torque = int(round(CC.actuators.torque * self.ccp.TI_STEER_MAX))
-          ti_apply_torque = apply_ti_steer_torque_limits(ti_new_torque, self.ti_apply_torque_last,
+          # MoreTore's StarPilot-dev (fe00f46 "fix ti command"): the Torque Interceptor is sent the
+          # stock LKAS command itself -- same 800-count scale, same 10/25 ramps and driver backoff,
+          # limited against the stock channel's last output. So it is never ramped on its own: when
+          # the TI comes back from DRIVER_OVER or a ramp-down it resumes at the stock command instead
+          # of climbing from zero. TI_STEER_* in CarControllerParams are unused, as in his build.
+          ti_new_torque = int(round(CC.actuators.torque * self.ccp.STEER_MAX))
+          ti_apply_torque = apply_driver_steer_torque_limits(ti_new_torque, self.apply_torque_last,
                                                     CS.out.steeringTorque, self.ccp)
 
     self.apply_torque_last = apply_torque
@@ -340,18 +345,10 @@ class CarController(CarControllerBase):
       ti_apply_torque if self.CP.flags & MazdaSafetyFlags.TORQUE_INTERCEPTOR else None))
 
     new_actuators = CC.actuators.as_builder()
-    # Report the torque of whichever actuator is actually steering the car. controlsd
-    # flags steer_limited_by_safety from |requested - applied|, so reporting the stock
-    # EPS channel while the TI does the work makes openpilot think it is being limited
-    # the moment the EPS clamps -- which on GEN1 is exactly when the TI is needed. That
-    # raised "Take Control, Turn Exceeds Steering Limit" on sharp low-speed turns even
-    # though the TI was tracking the request fine.
-    if self.CP.flags & MazdaSafetyFlags.TORQUE_INTERCEPTOR and CS.ti_lkas_allowed:
-      new_actuators.torque = ti_apply_torque / self.ccp.TI_STEER_MAX
-      new_actuators.torqueOutputCan = ti_apply_torque
-    else:
-      new_actuators.torque = apply_torque / self.ccp.STEER_MAX
-      new_actuators.torqueOutputCan = apply_torque
+    # As in MoreTore's build: the stock channel is reported. With the TI mirroring it, the two
+    # are the same command whenever the TI is steering.
+    new_actuators.torque = apply_torque / self.ccp.STEER_MAX
+    new_actuators.torqueOutputCan = apply_torque
 
     self.long_active_last = CC.longActive
     self.frame += 1
