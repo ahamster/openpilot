@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 
 from openpilot.tools.lib.logreader import _LogFileReader
 
@@ -117,8 +118,10 @@ class Scan:
     self.can_invalid = []
     self.can_invalid_open = None
     self.duration = 0.0
-    # what the panda ran and refused (counters are cumulative since panda boot: first and last seen)
-    self.panda_model, self.panda_param = None, None
+    # what the panda ran and refused (counters are cumulative since panda boot: first and last seen).
+    # The safety mode is counted per message: the panda is in noOutput before CarParams and after the
+    # car turns off, so the most common mode is the one that drove.
+    self.panda_modes: Counter = Counter()
     self.tx_blocked, self.rx_invalid = [None, None], [None, None]
     self.sent = {"crz_info": 0, "uds": 0, "res": 0}    # what openpilot asked pandad to send (sendcan)
     self.echo = {"crz_info": 0, "uds": 0, "res": 0}    # what came back from the panda as put on bus 0
@@ -165,7 +168,7 @@ class Scan:
           self.note(f"ALERT: {text}")
     elif w == "pandaStates":
       for ps in evt.pandaStates:
-        self.panda_model, self.panda_param = str(ps.safetyModel), int(ps.safetyParam)
+        self.panda_modes[(str(ps.safetyModel), int(ps.safetyParam))] += 1
         for pair, val in ((self.tx_blocked, ps.safetyTxBlocked), (self.rx_invalid, ps.safetyRxInvalid)):
           if pair[0] is None:
             pair[0] = val
@@ -175,7 +178,7 @@ class Scan:
       for c in evt.sendcan:
         if c.src == 0 and c.address == CRZ_INFO:
           self.sent["crz_info"] += 1
-        elif c.src == 0 and c.address == RADAR_UDS:
+        elif c.src == 0 and c.address == RADAR_UDS and len(c.dat) >= 2 and c.dat[0] == 2 and c.dat[1] in (0x10, 0x3E):
           self.sent["uds"] += 1
         elif c.src == 0 and c.address == CRZ_BTNS and (c.dat[0] & 0x04):
           self.sent["res"] += 1
@@ -201,7 +204,7 @@ class Scan:
           self.echo["crz_info"] += 1
           if self.t - self.stock_last < 0.04:
             self.double_master += 1
-        elif c.src == OP_ECHO and c.address == RADAR_UDS and len(d) >= 3 and d[0] == 2:
+        elif c.src == OP_ECHO and c.address == RADAR_UDS and len(d) >= 3 and d[0] == 2 and d[1] in (0x10, 0x3E):
           self.echo["uds"] += 1
           kind = UDS_NAMES.get((d[1], d[2]), f"UDS {d[1]:02x} {d[2]:02x}")
           if d[1] == 0x10:
@@ -291,10 +294,11 @@ def print_report(name: str, s: Scan, quiet: bool):
         f"  double-master frames {s.double_master}  canValid drops {len(s.can_invalid)}  radar alerts {len(s.radar_alerts)}")
   blocked = (s.tx_blocked[1] - s.tx_blocked[0]) if s.tx_blocked[0] is not None else None
   invalid = (s.rx_invalid[1] - s.rx_invalid[0]) if s.rx_invalid[0] is not None else None
-  print(f"  panda: safety {s.panda_model} param {s.panda_param} (265 = GEN1+TI+radar emulation)  tx blocked during route: {blocked}" +
-        f"  rx invalid: {invalid}")
+  modes = ", ".join(f"{m} param {prm} ({n} msgs)" for (m, prm), n in s.panda_modes.most_common(3)) or "unknown"
+  print(f"  panda safety while driving: {modes}   [265 = GEN1+TI+radar emulation; 9 = GEN1+TI only]")
+  print(f"  panda counters over the route: tx blocked {blocked}  rx invalid {invalid}")
   print("  openpilot -> bus: " + ", ".join(f"{k} sent {s.sent[k]} / on the bus {s.echo[k]}" for k in ("crz_info", "uds", "res")) +
-        "   (sent but not on the bus = refused by the panda)")
+        "   (uds = session control and tester present only; sent but not on the bus = refused by the panda)")
   for (t, v, dur, cmd) in s.takeovers:
     print(f"    takeover  at {t:7.1f}s {v * MPH:3.0f} mph: radar silent {dur:.2f} s after the request; started from stock command {cmd}")
   for (t, v, dur) in s.handbacks:
