@@ -8,7 +8,7 @@ import tempfile
 import pytest
 
 from openpilot.common import params as P
-from openpilot.common.params import ParamKeyType, UnknownKeyName, _HEADER_ONLY_KEYS, _HeaderOnlyStore, _compiled_params_class
+from openpilot.common.params import ParamKeyFlag, ParamKeyType, UnknownKeyName, _HEADER_ONLY_KEYS, _HeaderOnlyStore, _compiled_params_class
 
 
 class FakeCompiled:
@@ -63,7 +63,20 @@ class FakeCompiled:
     return [k.encode() for k in self.KNOWN]
 
   def get_settings_tier(self, key):
+    self.check_key(key)
     return 1
+
+  def get_tuning_level(self, key):
+    self.check_key(key)
+    return 0
+
+  def get_key_flag(self, key):
+    self.check_key(key)
+    return ParamKeyFlag.PERSISTENT
+
+  def cpp2python(self, key, value):
+    self.check_key(key)
+    return value
 
 
 Params = _compiled_params_class(FakeCompiled)
@@ -80,8 +93,8 @@ def root(monkeypatch):
 class TestHeaderParsing:
   def test_mazda_keys_are_header_only_candidates(self):
     for key in ("RadarEmulationEnabled", "LowerMinSetSpeed", "MazdaHybridLong"):
-      assert _HEADER_ONLY_KEYS[key] == ("BOOL", None)
-    assert _HEADER_ONLY_KEYS["TorqueInterceptorEnabled"] == ("BOOL", "1")
+      assert _HEADER_ONLY_KEYS[key] == ("BOOL", None, ("PERSISTENT",))
+    assert _HEADER_ONLY_KEYS["TorqueInterceptorEnabled"] == ("BOOL", "1", ("PERSISTENT",))
 
   def test_cleared_keys_are_never_handled(self):
     # anything the library would clear on manager start or a transition must not be kept in files
@@ -133,8 +146,29 @@ class TestWrapper:
     assert p.get_stock_value("MazdaHybridLong") is None
     assert b"MazdaHybridLong" in p.all_keys() and b"DongleId" in p.all_keys()
 
+  def test_every_method_the_galaxy_calls_on_all_keys(self, root, monkeypatch):
+    # the_galaxy builds its default-params table from all_keys(); none of these may raise for a header-only key
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeInt", ("INT", "5", ("PERSISTENT", "DONT_LOG")))
+    p = Params(root)
+    p.put_bool("MazdaHybridLong", True)
+    p.put_int("FakeInt", 9)
+    for raw_key in p.all_keys():
+      p.get_default_value(raw_key)
+      p.get_type(raw_key)
+      p.get_tuning_level(raw_key)
+      p.get_key_flag(raw_key)
+      p.get_settings_tier(raw_key)
+      p.get_stock_value(raw_key)
+    assert p.get_tuning_level("MazdaHybridLong") == 0
+    assert p.get_key_flag("MazdaHybridLong") == ParamKeyFlag.PERSISTENT
+    assert p.get_key_flag("FakeInt") == ParamKeyFlag.PERSISTENT | ParamKeyFlag.DONT_LOG
+    assert p.get_settings_tier("MazdaHybridLong") in (0, 1)
+    assert p.cpp2python("MazdaHybridLong", b"1") is True and p.cpp2python("FakeInt", b"9") == 9
+    with pytest.raises(UnknownKeyName):
+      p.get_tuning_level("NoSuchKey")
+
   def test_header_default_applies_when_unset(self, root, monkeypatch):
-    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeDefaultOn", ("BOOL", "1"))
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeDefaultOn", ("BOOL", "1", ("PERSISTENT",)))
     p = Params(root)
     assert p.get_bool("FakeDefaultOn") is True
     assert p.get("FakeDefaultOn") is None
@@ -144,10 +178,10 @@ class TestWrapper:
     assert p.get_bool("FakeDefaultOn") is False
 
   def test_other_types(self, root, monkeypatch):
-    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeInt", ("INT", None))
-    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeFloat", ("FLOAT", None))
-    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeStr", ("STRING", None))
-    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeJson", ("JSON", None))
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeInt", ("INT", None, ("PERSISTENT", "DONT_LOG")))
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeFloat", ("FLOAT", None, ("PERSISTENT", "DONT_LOG")))
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeStr", ("STRING", None, ("PERSISTENT", "DONT_LOG")))
+    monkeypatch.setitem(_HEADER_ONLY_KEYS, "FakeJson", ("JSON", None, ("PERSISTENT", "DONT_LOG")))
     p = Params(root)
     p.put_int("FakeInt", 7)
     assert p.get_int("FakeInt") == 7 and p.get("FakeInt") == 7

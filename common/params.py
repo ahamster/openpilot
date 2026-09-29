@@ -43,18 +43,19 @@ _SETTINGS_TIERS = _load_settings_tiers()
 _HEADER_KEY_RE = re.compile(r'^\s*\{"(?P<key>[^"]+)",\s*\{(?P<flags>[A-Z_ |]+?),\s*(?P<type>[A-Z]+)(?:,\s*"(?P<default>(?:[^"\\]|\\.)*)")?')
 
 
-def _load_header_only_keys() -> dict[str, tuple[str, str | None]]:
-  """key -> (type name, default) for every declared key with no CLEAR_ON_* flag."""
+def _load_header_only_keys() -> dict[str, tuple[str, str | None, tuple[str, ...]]]:
+  """key -> (type name, default, flag names) for every declared key with no CLEAR_ON_* flag."""
   params_keys = Path(__file__).with_name("params_keys.h")
   if not params_keys.exists():
     return {}
-  keys: dict[str, tuple[str, str | None]] = {}
+  keys: dict[str, tuple[str, str | None, tuple[str, ...]]] = {}
   for line in params_keys.read_text(encoding="utf-8", errors="ignore").splitlines():
     m = _HEADER_KEY_RE.match(line)
     if m is None or "CLEAR_ON" in m.group("flags"):
       continue
     default = m.group("default")
-    keys[m.group("key")] = (m.group("type"), default.replace('\\"', '"') if default is not None else None)
+    flags = tuple(f.strip() for f in m.group("flags").split("|") if f.strip())
+    keys[m.group("key")] = (m.group("type"), default.replace('\\"', '"') if default is not None else None, flags)
   return keys
 
 
@@ -184,11 +185,48 @@ def _compiled_params_class(base):
         return None
       return name, info[0], info[1], _header_store(self.get_param_path())
 
+    # Every remaining method of the compiled class that starts with check_key, so a caller that walks
+    # all_keys() (the_galaxy, device_syncd) never hits UnknownKeyName on a header-only key.
+    def get_tuning_level(self, key):
+      try:
+        return super().get_tuning_level(key)
+      except UnknownKeyName:
+        if self._header_only(key) is None:
+          raise
+        return 0
+
+    def get_key_flag(self, key):
+      try:
+        return super().get_key_flag(key)
+      except UnknownKeyName:
+        shim = self._header_only(key)
+        if shim is None:
+          raise
+        flag = ParamKeyFlag(0)
+        for name in _HEADER_ONLY_KEYS[shim[0]][2]:
+          if name in ParamKeyFlag.__members__:
+            flag |= ParamKeyFlag[name]
+        return flag
+
+    def cpp2python(self, key, value):
+      try:
+        return super().cpp2python(key, value)
+      except UnknownKeyName:
+        shim = self._header_only(key)
+        if shim is None:
+          raise
+        return _header_decode(shim[1], value if isinstance(value, bytes) else str(value).encode()) if value is not None else None
+
     def get_settings_tier(self, key):
       try:
         return super().get_settings_tier(key)
       except AttributeError:
         return _SETTINGS_TIERS.get(self.check_key(key), SETTINGS_ADVANCED)
+      except UnknownKeyName:
+        shim = self._header_only(key)
+        if shim is None:
+          raise
+        return _SETTINGS_TIERS.get(shim[0], SETTINGS_ADVANCED)
 
     def get(self, key, block=False, return_default=False, encoding=None, default=None):
       try:
