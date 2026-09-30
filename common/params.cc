@@ -107,6 +107,11 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"ExperimentalModeConfirmed", PERSISTENT},
     {"ExperimentalLongitudinalEnabled", PERSISTENT}, // WARNING: THIS MAY DISABLE AEB
     {"DisableUpdates", PERSISTENT},
+    {"AlwaysOnLateral", PERSISTENT},
+    {"AlwaysOnLateralMain", PERSISTENT},
+    {"PauseAOLOnBrake", PERSISTENT},
+    {"KonikDongleId", PERSISTENT},
+    {"StockDongleId", PERSISTENT},
     {"DisengageOnAccelerator", PERSISTENT},
     {"DongleId", PERSISTENT},
     {"DoReboot", CLEAR_ON_MANAGER_START},

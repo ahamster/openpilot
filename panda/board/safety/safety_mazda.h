@@ -101,6 +101,11 @@ static int mazda_rx_hook(CANPacket_t *to_push) {
     if (addr == MAZDA_CRZ_CTRL) {
       bool cruise_engaged = GET_BYTE(to_push, 0) & 0x8U;
       pcm_cruise_check(cruise_engaged);
+
+      // Always On Lateral: allow steering whenever cruise main is available.
+      // Tracked unconditionally; get_lateral_allowed() gates it on ALT_EXP_ALWAYS_ON_LATERAL.
+      // bit 17 of 0x21C is CRZ_AVAILABLE in mazda_2017.dbc.
+      lateral_controls_allowed = (GET_BYTE(to_push, 2) & 0x2U) != 0U;
     }
     
   }

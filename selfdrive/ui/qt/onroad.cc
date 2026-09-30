@@ -224,7 +224,7 @@ void AnnotatedCameraWidget::updateState(const UIState &s) {
 
   // update engageability and DM icons at 2Hz
   if (sm.frame % (UI_FREQ / 2) == 0) {
-    setProperty("engageable", cs.getEngageable() || cs.getEnabled());
+    setProperty("engageable", cs.getEngageable() || cs.getEnabled() || s.scene.always_on_lateral_active);
     setProperty("dmActive", sm["driverMonitoringState"].getDriverMonitoringState().getIsActiveMode());
     setProperty("rightHandDM", sm["driverMonitoringState"].getDriverMonitoringState().getIsRHD());
   }
@@ -465,7 +465,14 @@ void AnnotatedCameraWidget::drawLaneLines(QPainter &painter, const UIState *s) {
   // paint path
   QLinearGradient bg(0, height(), 0, height() / 4);
   float start_hue, end_hue;
-  if (sm["controlsState"].getControlsState().getExperimentalMode()) {
+  if (scene.always_on_lateral_active) {
+    // FrogPilot: teal path while steering with Always On Lateral.
+    // Takes precedence over experimental mode, matching FrogPilot's ordering.
+    const QColor aol = bg_colors[STATUS_LATERAL_ACTIVE];
+    bg.setColorAt(0.0, QColor::fromRgbF(aol.redF(), aol.greenF(), aol.blueF(), 0.4));
+    bg.setColorAt(0.5, QColor::fromRgbF(aol.redF(), aol.greenF(), aol.blueF(), 0.35));
+    bg.setColorAt(1.0, QColor::fromRgbF(aol.redF(), aol.greenF(), aol.blueF(), 0.0));
+  } else if (sm["controlsState"].getControlsState().getExperimentalMode()) {
     const auto &acceleration = sm["modelV2"].getModelV2().getAcceleration();
     float acceleration_future = 0;
     if (acceleration.getZ().size() > 16) {

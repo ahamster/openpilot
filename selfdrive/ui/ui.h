@@ -75,6 +75,7 @@ typedef enum UIStatus {
   STATUS_ENGAGED,
   STATUS_WARNING,
   STATUS_ALERT,
+  STATUS_LATERAL_ACTIVE,
 } UIStatus;
 
 const QColor bg_colors [] = {
@@ -83,6 +84,7 @@ const QColor bg_colors [] = {
   [STATUS_ENGAGED] = QColor(0x17, 0x86, 0x44, 0xf1),
   [STATUS_WARNING] = QColor(0xDA, 0x6F, 0x25, 0xf1),
   [STATUS_ALERT] = QColor(0xC9, 0x22, 0x31, 0xf1),
+  [STATUS_LATERAL_ACTIVE] = QColor(0x0a, 0xba, 0xb5, 0xf1),
 };
 
 typedef struct UIScene {
@@ -105,6 +107,7 @@ typedef struct UIScene {
 
   float light_sensor;
   bool started, ignition, is_metric, map_on_left, longitudinal_control;
+  bool always_on_lateral = false, always_on_lateral_active = false;
   uint64_t started_frame;
 } UIScene;
 

@@ -68,6 +68,18 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
       "../assets/offroad/icon_monitoring.png",
     },
     {
+      "AlwaysOnLateral",
+      tr("Always On Lateral"),
+      tr("<b>openpilot's steering stays active whenever the cruise control main button is on, even when openpilot is not engaged.</b><br><br>This also bypasses openpilot's gas-pedal cutout. Requires a restart of openpilot to take effect."),
+      "../assets/offroad/icon_openpilot.png",
+    },
+    {
+      "AlwaysOnLateralMain",
+      tr("Always On Lateral: Cruise Main Only"),
+      tr("Steer with <b>Always On Lateral</b> as soon as cruise control is switched on, before openpilot is engaged. Turn this off to only steer while stock cruise control is actually engaged."),
+      "../assets/offroad/icon_openpilot.png",
+    },
+    {
       "DisengageOnAccelerator",
       tr("Disengage on Accelerator Pedal"),
       tr("When enabled, pressing the accelerator pedal will disengage openpilot."),
@@ -104,6 +116,20 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
   toggles["ExperimentalMode"]->setConfirmation(true, true);
   toggles["ExperimentalLongitudinalEnabled"]->setConfirmation(true, false);
 
+  connect(toggles["AlwaysOnLateral"], &ToggleControl::toggleFlipped, [=]() {
+    updateToggles();
+  });
+
+  // The ALT_EXP_ALWAYS_ON_LATERAL panda flag is baked into CarParams at startup, and boardd only
+  // applies CarParams when it starts, so a restart is needed (possibly two, see updateStatus' controlsMismatch).
+  QObject::connect(toggles["AlwaysOnLateral"], &ToggleControl::toggleFlipped, [=](bool state) {
+    if (state && !uiState()->engaged()) {
+      if (ConfirmationDialog::confirm(tr("Always On Lateral requires a restart of openpilot to take effect. Reboot now?"), tr("Reboot"), this)) {
+        Params().putBool("DoReboot", true);
+      }
+    }
+  });
+
   connect(toggles["ExperimentalLongitudinalEnabled"], &ToggleControl::toggleFlipped, [=]() {
     updateToggles();
   });
@@ -118,6 +144,11 @@ void TogglesPanel::showEvent(QShowEvent *event) {
 }
 
 void TogglesPanel::updateToggles() {
+  // The AOL sub-option is only meaningful while AOL itself is on. "Disengage on Accelerator Pedal"
+  // stays visible: with AOL on, the panda gas cutout is bypassed, but this still controls whether the
+  // driver gets the "Pedal Pressed" alert when they override.
+  toggles["AlwaysOnLateralMain"]->setVisible(params.getBool("AlwaysOnLateral"));
+
   auto e2e_toggle = toggles["ExperimentalMode"];
   auto op_long_toggle = toggles["ExperimentalLongitudinalEnabled"];
   const QString e2e_description = tr("\

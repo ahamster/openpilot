@@ -2,6 +2,8 @@
 import time
 import json
 import jwt
+import random
+import string
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +25,7 @@ def is_registered_device() -> bool:
   return dongle not in (None, UNREGISTERED_DONGLE_ID)
 
 
-def register(show_spinner=False) -> Optional[str]:
+def register(show_spinner=False, register_konik=False) -> Optional[str]:
   params = Params()
   params.put("SubscriberInfo", HARDWARE.get_subscriber_info())
 
@@ -31,12 +33,13 @@ def register(show_spinner=False) -> Optional[str]:
   HardwareSerial = params.get("HardwareSerial", encoding='utf8')
   dongle_id: Optional[str] = params.get("DongleId", encoding='utf8')
   needs_registration = None in (IMEI, HardwareSerial, dongle_id)
+  needs_registration |= dongle_id == UNREGISTERED_DONGLE_ID
 
   pubkey = Path(PERSIST+"/comma/id_rsa.pub")
   if not pubkey.is_file():
     dongle_id = UNREGISTERED_DONGLE_ID
     cloudlog.warning(f"missing public key: {pubkey}")
-  elif needs_registration:
+  elif needs_registration or register_konik:
     if show_spinner:
       spinner = Spinner()
       spinner.update("registering device")
@@ -75,7 +78,7 @@ def register(show_spinner=False) -> Optional[str]:
 
         if resp.status_code in (402, 403):
           cloudlog.info(f"Unable to register device, got {resp.status_code}")
-          dongle_id = UNREGISTERED_DONGLE_ID
+          dongle_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
         else:
           dongleauth = json.loads(resp.text)
           dongle_id = dongleauth["dongle_id"]
@@ -86,13 +89,19 @@ def register(show_spinner=False) -> Optional[str]:
         time.sleep(backoff)
 
       if time.monotonic() - start_time > 60 and show_spinner:
+        dongle_id = UNREGISTERED_DONGLE_ID
+        break
+
+      if time.monotonic() - start_time > 60 and show_spinner:
         spinner.update(f"registering device - serial: {serial}, IMEI: ({imei1}, {imei2})")
 
     if show_spinner:
       spinner.close()
 
   if dongle_id:
-    params.put("DongleId", dongle_id)
+    if not register_konik and dongle_id != params.get("KonikDongleId", encoding="utf8"):
+      params.put("DongleId", dongle_id)
+      params.put("StockDongleId", dongle_id)
     set_offroad_alert("Offroad_UnofficialHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC)
   return dongle_id
 

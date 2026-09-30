@@ -108,8 +108,27 @@ class Controls:
     # set alternative experiences from parameters
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
     self.CP.alternativeExperience = 0
-    if not self.disengage_on_accelerator:
+
+    # Always On Lateral: keep steering while cruise main is on, regardless of gas/brake presses
+    self.always_on_lateral = self.params.get_bool("AlwaysOnLateral")
+    self.always_on_lateral_main = self.params.get_bool("AlwaysOnLateralMain")
+    # 0.9's Params has no get_int(); get() returns bytes, or None when unset.
+    # Unlike FrogPilot there is no UI control for this value in 0.9, so it can only
+    # be set by hand (python common/params.py PauseAOLOnBrake 10). Tolerate junk
+    # rather than raising ValueError inside __init__ and crash-looping controlsd.
+    try:
+      self.pause_aol_on_brake = int(self.params.get("PauseAOLOnBrake", encoding='utf8') or 0)
+    except (TypeError, ValueError):
+      cloudlog.warning("Invalid PauseAOLOnBrake value, defaulting to 0 (disabled)")
+      self.pause_aol_on_brake = 0
+    if self.always_on_lateral:
+      self.CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL
+
+    # AOL always bypasses the panda gas cut, but self.disengage_on_accelerator is deliberately
+    # left alone so the python-side "Pedal Pressed" alert still tells the driver they overrode.
+    if not self.disengage_on_accelerator or self.always_on_lateral:
       self.CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.DISABLE_DISENGAGE_ON_GAS
+    self.alternative_experience = self.CP.alternativeExperience
 
     if self.CP.dashcamOnly and self.params.get_bool("DashcamOverride"):
       self.CP.dashcamOnly = False
@@ -326,9 +345,12 @@ class Controls:
 
       if pandaState.torqueInterceptorDetected and not self.ti_ready:
         self.ti_ready = True
-        self.CP.enableTorqueInterceptor = True
         #Update CP based on torque_interceptor_ready
         self.CP = get_ti()
+        # get_ti() re-runs get_params(), which returns a fresh CarParams with
+        # enableTorqueInterceptor=False and alternativeExperience=0. Re-apply both.
+        self.CP.enableTorqueInterceptor = True
+        self.CP.alternativeExperience = self.alternative_experience
 
     # Handle HW and system malfunctions
     # Order is very intentional here. Be careful when modifying this.
@@ -589,8 +611,26 @@ class Controls:
 
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
+    # Always On Lateral: steer whenever cruise main is on, even when openpilot is not engaged.
+    # Stateless on purpose - a latch would keep AOL alive after cruise main is switched off.
+    CC.alwaysOnLateral = False
+    if self.always_on_lateral:
+      gear = car.CarState.GearShifter
+      aol = CS.cruiseState.available  # == CRZ_AVAILABLE, i.e. cruise main on
+      aol &= CS.gearShifter not in (gear.park, gear.reverse, gear.neutral, gear.unknown)
+      aol &= self.sm['liveCalibration'].calStatus == Calibration.CALIBRATED
+      if not self.always_on_lateral_main:
+        # opt-out: only steer while stock ACC is actually engaged, not merely armed
+        aol &= CS.cruiseState.enabled
+      if self.pause_aol_on_brake > 0:
+        aol &= not (CS.brakePressed and CS.vEgo < self.pause_aol_on_brake * CV.KPH_TO_MS) or CS.standstill
+      # FrogPilot: never keep steering through a hard fault (CAN error, controls mismatch,
+      # relay malfunction, LKAS fault, ...). Without this, latActive below would ignore them.
+      aol &= not self.events.any(ET.IMMEDIATE_DISABLE)
+      CC.alwaysOnLateral = aol
+
     # Check which actuators can be enabled
-    CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
+    CC.latActive = (self.active or CC.alwaysOnLateral) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    CS.vEgo > self.CP.minSteerSpeed and not CS.standstill
     CC.longActive = self.active and not self.events.any(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
 

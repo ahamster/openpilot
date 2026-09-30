@@ -347,6 +347,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   angle_meas.max = 0;
 
   controls_allowed = false;
+  lateral_controls_allowed = false;
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
 
@@ -488,12 +489,18 @@ float interpolate(struct lookup_t xy, float x) {
 }
 
 
+// Steering is allowed when controls are allowed, or (Always On Lateral only) when the safety mode
+// has set lateral_controls_allowed from cruise main. Identical to controls_allowed when AOL is off.
+static bool get_lateral_allowed(void) {
+  return controls_allowed || (lateral_controls_allowed && ((alternative_experience & ALT_EXP_ALWAYS_ON_LATERAL) != 0));
+}
+
 // Safety checks for torque-based steering commands
 bool steer_torque_cmd_checks(int desired_torque, int steer_req, const SteeringLimits limits) {
   bool violation = false;
   uint32_t ts = microsecond_timer_get();
 
-  if (controls_allowed) {
+  if (get_lateral_allowed()) {
     // *** global torque limit check ***
     violation |= max_limit_check(desired_torque, limits.max_steer, -limits.max_steer);
 
@@ -520,7 +527,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const SteeringLi
   }
 
   // no torque if controls is not allowed
-  if (!controls_allowed && (desired_torque != 0)) {
+  if (!get_lateral_allowed() && (desired_torque != 0)) {
     violation = true;
   }
 
@@ -562,7 +569,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const SteeringLi
   }
 
   // reset to 0 if either controls is not allowed or there's a violation
-  if (violation || !controls_allowed) {
+  if (violation || !get_lateral_allowed()) {
     valid_steer_req_count = 0;
     invalid_steer_req_count = 0;
     desired_torque_last = 0;

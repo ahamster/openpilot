@@ -38,6 +38,9 @@ def manager_init() -> None:
 
   default_params: List[Tuple[str, Union[str, bytes]]] = [
     ("CompletedTrainingVersion", "0"),
+    ("AlwaysOnLateral", "0"),
+    ("AlwaysOnLateralMain", "1"),
+    ("PauseAOLOnBrake", "0"),
     ("DisengageOnAccelerator", "1"),
     ("GsmMetered", "1"),
     ("HasAcceptedTerms", "0"),
@@ -83,8 +86,19 @@ def manager_init() -> None:
     params.remove("DongleId")
     params.put("ConnectVersion", "MoreTorqueV1")
 
-  # set dongle id
-  reg_res = register(show_spinner=True)
+  # set dongle id (per-server IDs so switching between comma/konik keeps both;
+  # mirrors FrogPilot's KonikDongleId handling in frogpilot_boot_functions)
+  if "konik" in os.getenv("API_HOST", ""):
+    konik_id = params.get("KonikDongleId", encoding="utf8")
+    if konik_id is None:
+      konik_id = register(show_spinner=True, register_konik=True)
+      params.put("KonikDongleId", konik_id)
+    params.put("DongleId", konik_id)
+    reg_res = konik_id
+  else:
+    if params.get("DongleId", encoding='utf8') == params.get("KonikDongleId", encoding='utf8'):
+      params.remove("DongleId")
+    reg_res = register(show_spinner=True)
   if reg_res:
     dongle_id = reg_res
   else:

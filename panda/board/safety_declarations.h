@@ -133,6 +133,7 @@ void safety_tick(const addr_checks *addr_checks);
 
 // This can be set by the safety hooks
 bool controls_allowed = false;
+bool lateral_controls_allowed = false;
 bool relay_malfunction = false;
 bool gas_interceptor_detected = false;
 int gas_interceptor_prev = 0;
@@ -183,6 +184,10 @@ struct sample_t angle_meas;         // last 6 steer angles
 // Setting this flag is used for allowing the full -5.0 to +4.0 m/s^2 at lower speeds
 // See ISO 15622:2018 for more information.
 #define ALT_EXP_RAISE_LONGITUDINAL_LIMITS_TO_ISO_MAX 8
+
+// Keep lateral control available while cruise is on, independent of gas/brake presses (Always On Lateral)
+// NOTE: matches upstream/Frogpilot, where 16 is ALT_EXP_ALLOW_AEB. Don't renumber.
+#define ALT_EXP_ALWAYS_ON_LATERAL 32
 
 int alternative_experience = 0;
 
