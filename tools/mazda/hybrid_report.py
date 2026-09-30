@@ -15,14 +15,21 @@ canValid dropping, and any alert that names the radar. Then the numbers that mat
   - every stretch with cruise engaged and no ACC master at all (nobody sending CRZ_INFO)
   - frames where the stock radar and openpilot both sent CRZ_INFO (must be 0)
   - cruise drops within 3 s of a switch
+  - the stock radar's own lead (CRZ_CTRL.RADAR_HAS_LEAD, its distance level, and the 0x361-0x366 tracks), readable
+    only while the radar is awake, against openpilot's vision lead (radarState.leadOne): how often they agree, who
+    sees a car first, how long each signal holds, and whether the track frames are decodable on this radar
 """
 import argparse
 import json
+import math
 import os
 import sys
 from collections import Counter
+from statistics import median
 
 from openpilot.tools.lib.logreader import _LogFileReader
+from opendbc.can.dbc import DBC
+from opendbc.can.parser import get_raw_value
 
 try:
   from openpilot.system.hardware.hw import Paths
@@ -31,7 +38,52 @@ except Exception:
   DEFAULT_ROOT = "/data/media/0/realdata"
 
 CRZ_INFO, CRZ_CTRL, CRZ_BTNS, PEDALS, RADAR_UDS, CRZ_EVENTS = 0x21B, 0x21C, 0x09D, 0x165, 0x764, 0x21F
+TRACK_ADDRS = (0x361, 0x362, 0x363, 0x364, 0x365, 0x366)
 AFTER_S, AFTER_STEP_S = 8.0, 0.5    # what the radar and the car do after each hand-back, sampled
+LEAD_MATCH_S = 5.0                  # a radar lead onset and a vision lead onset this close are the same car
+LEAD_SHORT_S = 3.0                  # a lead (or a gap between leads) shorter than this would thrash a switch
+TRACK_LANE_M = 2.5                  # a track this far to the side is not the car in front
+DBC_2017 = DBC("mazda_2017")
+DBC_RADAR = DBC("mazda_radar")      # the 0x361-0x366 target layout (DIST_OBJ, ANG_OBJ, RELV_OBJ)
+CRZ_CTRL_SIGS = ("CRZ_ACTIVE", "CRZ_AVAILABLE", "RADAR_HAS_LEAD", "RADAR_LEAD_RELATIVE_DISTANCE")
+
+
+def decode(dbc, addr: int, dat: bytes, names=None) -> dict:
+  msg = dbc.addr_to_msg[addr]
+  out = {}
+  for name, sig in msg.sigs.items():
+    if names is not None and name not in names:
+      continue
+    raw = get_raw_value(dat, sig)
+    if sig.is_signed:
+      raw -= ((raw >> (sig.size - 1)) & 1) * (1 << sig.size)
+    out[name] = raw * sig.factor + sig.offset
+  return out
+
+
+def track_target(addr: int, dat: bytes):
+  """(dRel m, vRel m/s, yRel m) carried by a radar track frame, or None when it holds no target (as radar_interface.py)."""
+  v = decode(DBC_RADAR, addr, dat)
+  if v["DIST_OBJ"] == 4095 or v["ANG_OBJ"] == 2046 or v["RELV_OBJ"] == -16:
+    return None
+  d_rel = v["DIST_OBJ"] / 16
+  return d_rel, v["RELV_OBJ"] / 16, -math.sin(math.radians(v["ANG_OBJ"] / 64)) * d_rel
+
+
+def runs(edges):
+  """From (t, on) edges: the lengths of the on runs and of the off runs between them."""
+  on, off = [], []
+  for (t0, a), (t1, _) in zip(edges, edges[1:], strict=False):
+    (on if a else off).append(t1 - t0)
+  return on, off
+
+
+def runs_text(lengths, label):
+  if not lengths:
+    return f"{label}: none"
+  short = sum(1 for x in lengths if x < LEAD_SHORT_S)
+  return f"{label}: {len(lengths)}, median {median(lengths):.1f} s, {short} under {LEAD_SHORT_S:.0f} s"
+
 STOCK, OP_ECHO = 0, 128          # src of the stock radar's frames, and of ours coming back from the panda (bus 0)
 ALIVE_S = 0.06                   # a 50 Hz CRZ_INFO stream counts as gone after three missed frames (as in hybrid.py)
 SWITCH_WINDOW_S = 3.0            # a cruise drop this soon after a switch is blamed on it
@@ -134,9 +186,30 @@ class Scan:
     self.driver_presses = 0        # RES / SET presses on the wheel (frames)
     self.after = []                # [(t_handback, [samples])]
     self.after_next_t = None
+    # the stock radar's own lead (only while it is awake) against openpilot's vision lead
+    self.radar_lead = False        # CRZ_CTRL.RADAR_HAS_LEAD
+    self.radar_lead_level = 0      # CRZ_CTRL.RADAR_LEAD_RELATIVE_DISTANCE
+    self.radar_lead_prev = None    # None right after a silence: the first frame back is not an edge
+    self.tracks = {}               # addr -> (dRel, vRel, yRel) of the track frames that carry a target
+    self.track_frames = 0
+    self.vision_lead = False       # radarState.leadOne.status: the vision lead on this car (radarUnavailable)
+    self.vision_drel = 0.0
+    self.vision_prev = False
+    self.hud_lead = False          # carControl.hudControl.leadVisible, what the car controller acted on
+    self.lead_sample_t = None
+    self.lead_time = Counter()     # seconds per (radar lead, vision lead) while awake, cruise on, moving
+    self.level_time = Counter()    # seconds per distance level while the radar showed a lead
+    self.readable_s = self.quiet_s = 0.0
+    self.track_diff = []           # |nearest track - vision dRel| when both saw a car
+    self.radar_lead_edges = []     # (t, on) while the radar was awake
+    self.vision_lead_edges = []
 
   def note(self, text: str):
     self.timeline.append((self.t, self.v, text))
+
+  def nearest_track(self):
+    ahead = [d for (d, _, y) in self.tracks.values() if abs(y) <= TRACK_LANE_M]
+    return min(ahead) if ahead else None
 
   def feed(self, evt):
     w = evt.which()
@@ -153,7 +226,7 @@ class Scan:
         self.after_next_t = self.t + AFTER_STEP_S
         self.after[-1][1].append((self.t - self.after[-1][0], self.v, self.stock_alive, self.stock_cmd, self.stock_active,
                                   self.stock_available, self.cruise, self.acc_off, self.set_speed, self.crz_started,
-                                  self.op_presses, self.driver_presses, self.op_enabled))
+                                  self.op_presses, self.driver_presses, self.op_enabled, self.radar_lead, self.vision_lead))
       if cs.canValid != self.can_valid:
         self.can_valid = cs.canValid
         if not cs.canValid:
@@ -164,10 +237,31 @@ class Scan:
           self.can_invalid_open = None
           self.note("canValid back")
     elif w == "carControl":
+      self.hud_lead = evt.carControl.hudControl.leadVisible
       en = evt.carControl.enabled
       if en != self.op_enabled:
         self.op_enabled = en
         self.note("openpilot engaged" if en else "openpilot disengaged")
+    elif w == "radarState":
+      lead = evt.radarState.leadOne
+      self.vision_lead, self.vision_drel = bool(lead.status), float(lead.dRel)
+      if self.vision_lead != self.vision_prev:
+        self.vision_lead_edges.append((self.t, self.vision_lead))
+        self.vision_prev = self.vision_lead
+      if self.lead_sample_t is not None and self.v > 1.0:
+        dt = min(self.t - self.lead_sample_t, 0.2)
+        if self.stock_alive:
+          self.readable_s += dt
+          if self.cruise:
+            self.lead_time[(self.radar_lead, self.vision_lead)] += dt
+            if self.radar_lead:
+              self.level_time[self.radar_lead_level] += dt
+            near = self.nearest_track()
+            if self.radar_lead and self.vision_lead and near is not None:
+              self.track_diff.append(abs(near - self.vision_drel))
+        else:
+          self.quiet_s += dt
+      self.lead_sample_t = self.t
     elif w == "selfdriveState":
       ss = evt.selfdriveState
       if ss.experimentalMode != self.experimental:
@@ -212,8 +306,19 @@ class Scan:
             self.note("stock radar in standby (no command)" if cmd is None else f"stock radar commanding ({cmd})")
           self.stock_cmd = cmd
         elif c.src == STOCK and c.address == CRZ_CTRL and len(d) >= 8:
-          self.stock_active = bool(d[0] & 0x08)
-          self.stock_available = bool(d[2] & 0x02)
+          v = decode(DBC_2017, CRZ_CTRL, d, CRZ_CTRL_SIGS)
+          self.stock_active, self.stock_available = v["CRZ_ACTIVE"] == 1, v["CRZ_AVAILABLE"] == 1
+          self.radar_lead, self.radar_lead_level = v["RADAR_HAS_LEAD"] == 1, int(v["RADAR_LEAD_RELATIVE_DISTANCE"])
+          if self.radar_lead_prev is not None and self.radar_lead != self.radar_lead_prev:
+            self.radar_lead_edges.append((self.t, self.radar_lead))
+          self.radar_lead_prev = self.radar_lead
+        elif c.src == STOCK and c.address in TRACK_ADDRS and len(d) >= 8:
+          target = track_target(c.address, d)
+          if target is None:
+            self.tracks.pop(c.address, None)
+          else:
+            self.tracks[c.address] = target
+            self.track_frames += 1
         elif c.src == STOCK and c.address == CRZ_EVENTS and len(d) >= 8:
           self.set_speed = ((d[0] << 8) | d[1]) * 0.005 - 0.5
           self.crz_started = bool(d[2] & 0x04)
@@ -257,6 +362,9 @@ class Scan:
       self.stock_alive = stock_alive
       if not stock_alive:
         self.note("stock radar SILENT")
+        self.radar_lead_prev = None
+        self.radar_lead = False
+        self.tracks.clear()
       else:
         self.note("stock radar BACK")
         if self.pending_request and "restart" in self.pending_request[1]:
@@ -313,6 +421,54 @@ def scan_route(name: str, segs: list) -> Scan:
   return s
 
 
+def print_leads(s: Scan):
+  """The stock radar's lead against openpilot's vision lead, for the switching logic."""
+  total = s.readable_s + s.quiet_s
+  print("  stock radar lead vs openpilot vision lead")
+  if total <= 0:
+    print("    (no moving time with lead data)")
+    return
+  print(f"    radar readable (awake) {100 * s.readable_s / total:.0f}% of the moving time, quiet (openpilot driving) {100 * s.quiet_s / total:.0f}%")
+  engaged = sum(s.lead_time.values())
+  if engaged > 0:
+    both, r_only, v_only, neither = (s.lead_time[(True, True)], s.lead_time[(True, False)], s.lead_time[(False, True)],
+                                     s.lead_time[(False, False)])
+    print(f"    while awake with cruise on ({engaged:.0f} s): radar lead {100 * (both + r_only) / engaged:.0f}%, vision lead " +
+          f"{100 * (both + v_only) / engaged:.0f}%; both {100 * both / engaged:.0f}%, radar only {100 * r_only / engaged:.0f}%, " +
+          f"vision only {100 * v_only / engaged:.0f}%, neither {100 * neither / engaged:.0f}%")
+    if s.level_time:
+      shown = sum(s.level_time.values())
+      levels = "  ".join(f"{lvl}: {100 * secs / shown:.0f}%" for lvl, secs in sorted(s.level_time.items()))
+      print(f"    radar lead-distance level while it showed a lead: {levels}")
+  else:
+    print("    (the radar was never awake with cruise on while moving: nothing to compare)")
+  radar_on = [t for t, on in s.radar_lead_edges if on]
+  vision_on = [t for t, on in s.vision_lead_edges if on]
+  deltas = []
+  for tr in radar_on:
+    close = [tv - tr for tv in vision_on if abs(tv - tr) <= LEAD_MATCH_S]
+    if close:
+      deltas.append(min(close, key=abs))
+  if radar_on:
+    v_first = sum(1 for x in deltas if x < -0.2)
+    r_first = sum(1 for x in deltas if x > 0.2)
+    same = len(deltas) - v_first - r_first
+    who = (f"vision earlier by median {-median(deltas):.1f} s" if deltas and median(deltas) < 0 else
+           f"radar earlier by median {median(deltas):.1f} s" if deltas else "no matches")
+    print(f"    lead onsets: radar {len(radar_on)}, vision {len(vision_on)}; {len(deltas)} of the radar onsets match a vision onset " +
+          f"within {LEAD_MATCH_S:.0f} s: {who} (vision first {v_first}, radar first {r_first}, together {same}); " +
+          f"{len(radar_on) - len(deltas)} radar onsets with no vision onset near them")
+  r_on, r_off = runs(s.radar_lead_edges)
+  v_on, v_off = runs(s.vision_lead_edges)
+  print("    " + runs_text(r_on, "radar lead runs") + "; " + runs_text(r_off, "gaps between them"))
+  print("    " + runs_text(v_on, "vision lead runs (whole drive)") + "; " + runs_text(v_off, "gaps between them"))
+  if s.track_frames:
+    diff = f"; nearest track vs vision dRel: median difference {median(s.track_diff):.1f} m over {len(s.track_diff)} samples" if s.track_diff else ""
+    print(f"    radar tracks: {s.track_frames} frames carried a target{diff}")
+  else:
+    print("    radar tracks: no 0x361-0x366 frame ever carried a target (the track layout is not readable on this radar)")
+
+
 def print_report(name: str, s: Scan, quiet: bool):
   print(f"\n=== route {name}  build {s.commit}  {s.duration / 60:.1f} min")
   print(f"  takeovers {len(s.takeovers)}  hand-backs {len(s.handbacks)}  RES frames pressed by openpilot {s.op_presses}" +
@@ -328,12 +484,13 @@ def print_report(name: str, s: Scan, quiet: bool):
     print(f"    takeover  at {t:7.1f}s {v * MPH:3.0f} mph: radar silent {dur:.2f} s after the request; started from stock command {cmd}")
   for (t, v, dur), (_, samples) in zip(s.handbacks, s.after, strict=True):
     print(f"    hand-back at {t:7.1f}s {v * MPH:3.0f} mph: radar back {dur:.2f} s after the request")
-    print("        +s   mph  radar  stockCmd  CRZ_ACTIVE CRZ_AVAIL  car:cruise accOff  setKph started  RES/SET frames op/driver  op")
-    for (dt, vv, alive, cmd, act, avail, cruise, off, spd, started, opp, drv, en) in samples:
+    print("        +s   mph  radar  stockCmd  CRZ_ACTIVE CRZ_AVAIL  car:cruise accOff  setKph started  RES/SET frames op/driver  op   lead radar/vision")
+    for (dt, vv, alive, cmd, act, avail, cruise, off, spd, started, opp, drv, en, rlead, vlead) in samples:
       cmd_txt = f"{cmd:6d}" if cmd is not None else "standby"
       spd_txt = f"{spd:6.1f}" if spd is not None else "     ?"
       print(f"      {dt:4.1f} {vv * MPH:5.0f}  {'alive' if alive else 'quiet':>5}  {cmd_txt:>8}  {int(act):10d} {int(avail):9d}" +
-            f"  {int(cruise):10d} {int(off):6d}  {spd_txt} {int(started):7d}  {opp:8d} / {drv:<6d}  {'on' if en else 'off'}")
+            f"  {int(cruise):10d} {int(off):6d}  {spd_txt} {int(started):7d}  {opp:8d} / {drv:<6d}  {'on' if en else 'off':>3}" +
+            f"   {int(rlead)} / {int(vlead)}")
   for kind, title in (("standby", "cruise engaged, radar alive but in standby, openpilot not driving (throttle, no brakes)"),
                       ("no_master", "cruise engaged and nobody sending CRZ_INFO")):
     long_ones = [x for x in s.spans[kind] if x[1] - x[0] >= MIN_SPAN_S]
@@ -341,6 +498,7 @@ def print_report(name: str, s: Scan, quiet: bool):
     print(f"  {title}: {total:.1f} s in total, {len(long_ones)} stretch(es) of {MIN_SPAN_S} s or more")
     for (a, b, vmin, vmax, how) in long_ones:
       print(f"    {a:7.1f}s  {b - a:5.1f} s  {vmin * MPH:3.0f}-{vmax * MPH:<3.0f} mph  ended by: {how}")
+  print_leads(s)
   if s.cruise_drops_after_switch:
     print("  cruise drops within 3 s of a switch:")
     for (t, kind, dt) in s.cruise_drops_after_switch:
