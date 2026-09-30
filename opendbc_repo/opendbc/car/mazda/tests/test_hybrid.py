@@ -107,10 +107,16 @@ def arb_update(a: HybridArbiter, n=1, emulating=False, engaged=True, long_active
 
 
 class TestHybridArbiter:
-  def test_takeover_needs_debounce(self):
+  def test_takeover_needs_two_seconds_of_experimental(self):
     a = HybridArbiter()
-    assert not arb_update(a, HybridArbiter.DEBOUNCE_FRAMES - 1, experimental=True)
+    assert not arb_update(a, HybridArbiter.TAKEOVER_DEBOUNCE_FRAMES - 1, experimental=True)
     assert arb_update(a, 1, experimental=True)
+
+  def test_flickering_experimental_never_takes_over(self):
+    a = HybridArbiter()
+    for _ in range(20):
+      assert not arb_update(a, HybridArbiter.TAKEOVER_DEBOUNCE_FRAMES - 10, experimental=True)
+      assert not arb_update(a, 5, experimental=False)
 
   def test_takeover_gates(self):
     for kw in ({"long_active": False}, {"gas": True}, {"brake": True}, {"v": 1.5}, {"engaged": False}, {"experimental": False}):
@@ -123,17 +129,28 @@ class TestHybridArbiter:
   def test_mrcc_unavailable_takes_over_without_experimental(self):
     a = HybridArbiter()
     a.mrcc_unavailable = True
-    assert arb_update(a, HybridArbiter.DEBOUNCE_FRAMES)
+    assert not arb_update(a, HybridArbiter.DEBOUNCE_FRAMES - 1)   # a latched fault: the short debounce, not the 2 s one
+    assert arb_update(a, 1)
     # and keeps the radar in standard mode
     assert arb_update(a, 400, emulating=True)
 
   def test_dwell_between_switches(self):
     a = HybridArbiter()
-    assert arb_update(a, HybridArbiter.DEBOUNCE_FRAMES, experimental=True)
-    assert arb_update(a, HybridArbiter.DWELL_FRAMES - 1, emulating=True)
-    assert not arb_update(a, 1, emulating=True)
+    assert arb_update(a, HybridArbiter.TAKEOVER_DEBOUNCE_FRAMES, experimental=True)
+    # a disengage right after the takeover: the hand-back waits for the dwell, not just its own debounce
+    assert arb_update(a, HybridArbiter.DWELL_FRAMES - 1, emulating=True, engaged=False)
+    assert not arb_update(a, 1, emulating=True, engaged=False)
 
-  def test_handback_gates(self):
+  def test_no_handback_while_engaged(self):
+    # standard mode, above the speed MRCC could be set at, openpilot not braking: still no hand-back
+    a = HybridArbiter()
+    a.want_emulation = True
+    assert arb_update(a, 6000, emulating=True, experimental=False, v=30.0, accel=0.0)
+    # only a disengage hands the radar back
+    assert not arb_update(a, HybridArbiter.DISENGAGED_DEBOUNCE_FRAMES, emulating=True, engaged=False)
+
+  def test_handback_gates_when_engaged_handback_is_enabled(self, monkeypatch):
+    monkeypatch.setattr(HybridArbiter, "HANDBACK_WHILE_ENGAGED", True)
     a = HybridArbiter()
     a.want_emulation = True
     assert arb_update(a, 400, emulating=True, v=8.0)               # below the speed MRCC can be set at

@@ -158,14 +158,29 @@ class RadarWitness:
 
 
 class HybridArbiter:
-  """Which ACC master is wanted: True = radar emulation (openpilot), False = stock MRCC."""
-  DEBOUNCE_FRAMES = int(round(0.75 / DT_CTRL))            # a wish must hold this long to count
+  """Which ACC master is wanted: True = radar emulation (openpilot), False = stock MRCC.
+
+  Hand-backs while engaged are off (HANDBACK_WHILE_ENGAGED). On the 2023 CX-9 a radar that is let go
+  mid-engagement comes back in standby every time: cruise still reads engaged, the dash still shows the
+  set speed, but the radar commands nothing, and neither of the RES presses MrccResync makes wakes it
+  (route 0000000f, 2026-09-30: 33 hand-backs at 30-70 mph, MRCC drove again after none of them, 97 s
+  in total with cruise engaged and nothing braking). Only the driver's own SET or RES after a disengage
+  brings MRCC back properly, and that is the one hand-back that is kept: openpilot disengaged, or a
+  standstill with the brake held. So a drive goes stock MRCC -> (first experimental trigger) openpilot ->
+  stays openpilot until the driver disengages, then MRCC again on their next SET. While that holds, the
+  Conditional Experimental Mode status only ever starts a takeover, and one that has to hold for
+  TAKEOVER_DEBOUNCE_FRAMES: a trigger that flickers (a lead that comes and goes, a curve) must not
+  restart the radar over and over.
+  """
+  HANDBACK_WHILE_ENGAGED = False                          # see above; True restores the CEM-driven hand-back
+  TAKEOVER_DEBOUNCE_FRAMES = int(round(2.0 / DT_CTRL))    # experimental must hold this long before a takeover
+  DEBOUNCE_FRAMES = int(round(0.75 / DT_CTRL))            # any other wish must hold this long to count
   DISENGAGED_DEBOUNCE_FRAMES = int(round(2.0 / DT_CTRL))  # tolerate a quick re-engage
   DWELL_FRAMES = int(round(3.0 / DT_CTRL))                # minimum time between switches
   TAKEOVER_WATCH_FRAMES = int(round(3.0 / DT_CTRL))       # a disengage this soon after a takeover blames it
   TAKEOVER_MIN_SPEED = 2.0    # m/s: never take over at a stop, stops belong to whoever is driving
-  HANDBACK_MIN_SPEED = 8.5    # m/s (~19 mph): MRCC can be SET again here if the restart drops it
-  HANDBACK_MAX_DECEL = -0.5   # m/s^2: never hand back in the middle of a braking event
+  HANDBACK_MIN_SPEED = 8.5    # m/s (~19 mph): MRCC can be SET again here if the restart drops it (engaged hand-back only)
+  HANDBACK_MAX_DECEL = -0.5   # m/s^2: never hand back in the middle of a braking event (engaged hand-back only)
 
   def __init__(self):
     self.want_emulation = False
@@ -188,7 +203,7 @@ class HybridArbiter:
       # the driver is holding the car on the brake. A stop is never a reason to take over.
       return emulating and not brake_pressed
     if emulating:
-      if experimental or self.mrcc_unavailable:
+      if experimental or self.mrcc_unavailable or not self.HANDBACK_WHILE_ENGAGED:
         return True
       # Standard mode: back to MRCC, unless openpilot is braking or MRCC could not be set again.
       return v_ego < self.HANDBACK_MIN_SPEED or accel < self.HANDBACK_MAX_DECEL
@@ -221,7 +236,14 @@ class HybridArbiter:
       return self.want_emulation
 
     self.pending_frames += 1
-    debounce = self.DEBOUNCE_FRAMES if engaged else self.DISENGAGED_DEBOUNCE_FRAMES
+    if not engaged:
+      debounce = self.DISENGAGED_DEBOUNCE_FRAMES
+    elif want and not self.mrcc_unavailable:
+      # a takeover on the experimental-mode status alone: the status must hold, it flickers
+      debounce = self.TAKEOVER_DEBOUNCE_FRAMES
+    else:
+      # a takeover because MRCC is asleep (a latched fault), or any other change
+      debounce = self.DEBOUNCE_FRAMES
     if self.pending_frames >= debounce and self.frames_since_switch >= self.DWELL_FRAMES:
       carlog.warning({"event": "mazdaHybridWant", "emulation": want, "engaged": engaged,
                       "experimental": experimental, "standstill": standstill, "vEgo": round(v_ego, 2)})
