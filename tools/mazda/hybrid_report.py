@@ -30,7 +30,8 @@ try:
 except Exception:
   DEFAULT_ROOT = "/data/media/0/realdata"
 
-CRZ_INFO, CRZ_CTRL, CRZ_BTNS, PEDALS, RADAR_UDS = 0x21B, 0x21C, 0x09D, 0x165, 0x764
+CRZ_INFO, CRZ_CTRL, CRZ_BTNS, PEDALS, RADAR_UDS, CRZ_EVENTS = 0x21B, 0x21C, 0x09D, 0x165, 0x764, 0x21F
+AFTER_S, AFTER_STEP_S = 8.0, 0.5    # what the radar and the car do after each hand-back, sampled
 STOCK, OP_ECHO = 0, 128          # src of the stock radar's frames, and of ours coming back from the panda (bus 0)
 ALIVE_S = 0.06                   # a 50 Hz CRZ_INFO stream counts as gone after three missed frames (as in hybrid.py)
 SWITCH_WINDOW_S = 3.0            # a cruise drop this soon after a switch is blamed on it
@@ -125,6 +126,14 @@ class Scan:
     self.tx_blocked, self.rx_invalid = [None, None], [None, None]
     self.sent = {"crz_info": 0, "uds": 0, "res": 0}    # what openpilot asked pandad to send (sendcan)
     self.echo = {"crz_info": 0, "uds": 0, "res": 0}    # what came back from the panda as put on bus 0
+    # the radar's and the car's state after each hand-back: does MRCC ever drive again, and what does it need
+    self.stock_available = False   # CRZ_CTRL.CRZ_AVAILABLE from the stock radar
+    self.acc_off = False           # PEDALS.ACC_OFF: MRCC armed but not controlling
+    self.set_speed = None          # CRZ_EVENTS.CRZ_SPEED (kph), the dash set speed
+    self.crz_started = False       # CRZ_EVENTS.CRZ_STARTED
+    self.driver_presses = 0        # RES / SET presses on the wheel (frames)
+    self.after = []                # [(t_handback, [samples])]
+    self.after_next_t = None
 
   def note(self, text: str):
     self.timeline.append((self.t, self.v, text))
@@ -140,6 +149,11 @@ class Scan:
     elif w == "carState":
       cs = evt.carState
       self.v = cs.vEgo
+      if self.after and self.t - self.after[-1][0] <= AFTER_S and self.t >= self.after_next_t:
+        self.after_next_t = self.t + AFTER_STEP_S
+        self.after[-1][1].append((self.t - self.after[-1][0], self.v, self.stock_alive, self.stock_cmd, self.stock_active,
+                                  self.stock_available, self.cruise, self.acc_off, self.set_speed, self.crz_started,
+                                  self.op_presses, self.driver_presses, self.op_enabled))
       if cs.canValid != self.can_valid:
         self.can_valid = cs.canValid
         if not cs.canValid:
@@ -199,6 +213,10 @@ class Scan:
           self.stock_cmd = cmd
         elif c.src == STOCK and c.address == CRZ_CTRL and len(d) >= 8:
           self.stock_active = bool(d[0] & 0x08)
+          self.stock_available = bool(d[2] & 0x02)
+        elif c.src == STOCK and c.address == CRZ_EVENTS and len(d) >= 8:
+          self.set_speed = ((d[0] << 8) | d[1]) * 0.005 - 0.5
+          self.crz_started = bool(d[2] & 0x04)
         elif c.src == OP_ECHO and c.address == CRZ_INFO:
           self.op_last = self.t
           self.echo["crz_info"] += 1
@@ -216,10 +234,15 @@ class Scan:
           if self.press_open is None or self.t - self.press_open > 0.5:
             self.note("openpilot pressed RES")
           self.press_open = self.t
-        elif c.src == STOCK and c.address == CRZ_BTNS and (d[0] & 0x04):
-          self.note("driver pressed RES")
+        elif c.src == STOCK and c.address == CRZ_BTNS and (d[0] & 0x34):
+          self.driver_presses += 1
+          which = "RES" if d[0] & 0x04 else ("SET+" if d[0] & 0x10 else "SET-")
+          if self.press_open is None or self.t - self.press_open > 0.5:
+            self.note(f"driver pressed {which}")
+          self.press_open = self.t
         elif c.src == STOCK and c.address == PEDALS and len(d) >= 1:
           cruise = bool(d[0] & 0x08)
+          self.acc_off = bool(d[0] & 0x04)
           if cruise != self.cruise:
             self.cruise = cruise
             self.note("cruise ENGAGED (car)" if cruise else "cruise DROPPED (car)")
@@ -240,6 +263,8 @@ class Scan:
           self.handbacks.append((self.t, self.v, self.t - self.pending_request[0]))
           self.last_switch = (self.t, "hand-back")
           self.pending_request = None
+          self.after.append((self.t, []))
+          self.after_next_t = self.t
     if op_active != self.op_active:
       self.op_active = op_active
       if op_active:
@@ -301,8 +326,14 @@ def print_report(name: str, s: Scan, quiet: bool):
         "   (uds = session control and tester present only; sent but not on the bus = refused by the panda)")
   for (t, v, dur, cmd) in s.takeovers:
     print(f"    takeover  at {t:7.1f}s {v * MPH:3.0f} mph: radar silent {dur:.2f} s after the request; started from stock command {cmd}")
-  for (t, v, dur) in s.handbacks:
+  for (t, v, dur), (_, samples) in zip(s.handbacks, s.after, strict=True):
     print(f"    hand-back at {t:7.1f}s {v * MPH:3.0f} mph: radar back {dur:.2f} s after the request")
+    print("        +s   mph  radar  stockCmd  CRZ_ACTIVE CRZ_AVAIL  car:cruise accOff  setKph started  RES/SET frames op/driver  op")
+    for (dt, vv, alive, cmd, act, avail, cruise, off, spd, started, opp, drv, en) in samples:
+      cmd_txt = f"{cmd:6d}" if cmd is not None else "standby"
+      spd_txt = f"{spd:6.1f}" if spd is not None else "     ?"
+      print(f"      {dt:4.1f} {vv * MPH:5.0f}  {'alive' if alive else 'quiet':>5}  {cmd_txt:>8}  {int(act):10d} {int(avail):9d}" +
+            f"  {int(cruise):10d} {int(off):6d}  {spd_txt} {int(started):7d}  {opp:8d} / {drv:<6d}  {'on' if en else 'off'}")
   for kind, title in (("standby", "cruise engaged, radar alive but in standby, openpilot not driving (throttle, no brakes)"),
                       ("no_master", "cruise engaged and nobody sending CRZ_INFO")):
     long_ones = [x for x in s.spans[kind] if x[1] - x[0] >= MIN_SPAN_S]
