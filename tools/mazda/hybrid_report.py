@@ -180,6 +180,7 @@ class Scan:
     self.echo = {"crz_info": 0, "uds": 0, "res": 0}    # what came back from the panda as put on bus 0
     # the radar's and the car's state after each hand-back: does MRCC ever drive again, and what does it need
     self.stock_available = False   # CRZ_CTRL.CRZ_AVAILABLE from the stock radar
+    self.stock_set_allowed = False # CRZ_INFO.ACC_SET_ALLOWED: the radar would accept SET / RES now
     self.acc_off = False           # PEDALS.ACC_OFF: MRCC armed but not controlling
     self.set_speed = None          # CRZ_EVENTS.CRZ_SPEED (kph), the dash set speed
     self.crz_started = False       # CRZ_EVENTS.CRZ_STARTED
@@ -226,7 +227,8 @@ class Scan:
         self.after_next_t = self.t + AFTER_STEP_S
         self.after[-1][1].append((self.t - self.after[-1][0], self.v, self.stock_alive, self.stock_cmd, self.stock_active,
                                   self.stock_available, self.cruise, self.acc_off, self.set_speed, self.crz_started,
-                                  self.op_presses, self.driver_presses, self.op_enabled, self.radar_lead, self.vision_lead))
+                                  self.op_presses, self.driver_presses, self.op_enabled, self.radar_lead, self.vision_lead,
+                                  self.stock_set_allowed))
       if cs.canValid != self.can_valid:
         self.can_valid = cs.canValid
         if not cs.canValid:
@@ -302,6 +304,7 @@ class Scan:
         if c.src == STOCK and c.address == CRZ_INFO and len(d) >= 8:
           self.stock_last = self.t
           cmd = accel_cmd(d)
+          self.stock_set_allowed = decode(DBC_2017, CRZ_INFO, d, ("ACC_SET_ALLOWED",))["ACC_SET_ALLOWED"] == 1
           if (cmd is None) != (self.stock_cmd is None) and self.stock_alive:
             self.note("stock radar in standby (no command)" if cmd is None else f"stock radar commanding ({cmd})")
           self.stock_cmd = cmd
@@ -484,11 +487,11 @@ def print_report(name: str, s: Scan, quiet: bool):
     print(f"    takeover  at {t:7.1f}s {v * MPH:3.0f} mph: radar silent {dur:.2f} s after the request; started from stock command {cmd}")
   for (t, v, dur), (_, samples) in zip(s.handbacks, s.after, strict=True):
     print(f"    hand-back at {t:7.1f}s {v * MPH:3.0f} mph: radar back {dur:.2f} s after the request")
-    print("        +s   mph  radar  stockCmd  CRZ_ACTIVE CRZ_AVAIL  car:cruise accOff  setKph started  RES/SET frames op/driver  op   lead radar/vision")
-    for (dt, vv, alive, cmd, act, avail, cruise, off, spd, started, opp, drv, en, rlead, vlead) in samples:
+    print("        +s   mph  radar  stockCmd  CRZ_ACTIVE CRZ_AVAIL setOK  car:cruise accOff  setKph started  RES/SET frames op/driver  op   lead radar/vision")
+    for (dt, vv, alive, cmd, act, avail, cruise, off, spd, started, opp, drv, en, rlead, vlead, set_ok) in samples:
       cmd_txt = f"{cmd:6d}" if cmd is not None else "standby"
       spd_txt = f"{spd:6.1f}" if spd is not None else "     ?"
-      print(f"      {dt:4.1f} {vv * MPH:5.0f}  {'alive' if alive else 'quiet':>5}  {cmd_txt:>8}  {int(act):10d} {int(avail):9d}" +
+      print(f"      {dt:4.1f} {vv * MPH:5.0f}  {'alive' if alive else 'quiet':>5}  {cmd_txt:>8}  {int(act):10d} {int(avail):9d} {int(set_ok):5d}" +
             f"  {int(cruise):10d} {int(off):6d}  {spd_txt} {int(started):7d}  {opp:8d} / {drv:<6d}  {'on' if en else 'off':>3}" +
             f"   {int(rlead)} / {int(vlead)}")
   for kind, title in (("standby", "cruise engaged, radar alive but in standby, openpilot not driving (throttle, no brakes)"),
