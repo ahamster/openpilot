@@ -142,6 +142,7 @@ class Scan:
   def __init__(self):
     self.t0 = None
     self.t = 0.0
+    self.tc = 0.0                # the CAN stream's own clock: radar and replacement-frame liveness are judged on it
     self.commit = ""
     self.v = 0.0
     self.cruise = False          # PEDALS.ACC_ACTIVE, the car's own word for MRCC engaged
@@ -216,7 +217,9 @@ class Scan:
     w = evt.which()
     if self.t0 is None:
       self.t0 = evt.logMonoTime * 1e-9
-    self.t = evt.logMonoTime * 1e-9 - self.t0
+    # rlog events from different services are not strictly in time order; time never runs backwards here, or a
+    # late carState would make the 60 ms liveness checks flicker the radar "silent" and "back" within a frame
+    self.t = max(self.t, evt.logMonoTime * 1e-9 - self.t0)
     self.duration = self.t
     if w == "initData":
       self.commit = evt.initData.gitCommit[:7]
@@ -299,10 +302,11 @@ class Scan:
         detail = ", ".join(f"{k}={v}" for k, v in ev.items() if k != "event")
         self.note(f"log {ev['event']}  {detail}")
     elif w == "can":
+      self.tc = max(self.tc, evt.logMonoTime * 1e-9 - self.t0)
       for c in evt.can:
         d = c.dat
         if c.src == STOCK and c.address == CRZ_INFO and len(d) >= 8:
-          self.stock_last = self.t
+          self.stock_last = self.tc
           cmd = accel_cmd(d)
           self.stock_set_allowed = decode(DBC_2017, CRZ_INFO, d, ("ACC_SET_ALLOWED",))["ACC_SET_ALLOWED"] == 1
           if (cmd is None) != (self.stock_cmd is None) and self.stock_alive:
@@ -326,9 +330,9 @@ class Scan:
           self.set_speed = ((d[0] << 8) | d[1]) * 0.005 - 0.5
           self.crz_started = bool(d[2] & 0x04)
         elif c.src == OP_ECHO and c.address == CRZ_INFO:
-          self.op_last = self.t
+          self.op_last = self.tc
           self.echo["crz_info"] += 1
-          if self.t - self.stock_last < 0.04:
+          if self.tc - self.stock_last < 0.04:
             self.double_master += 1
         elif c.src == OP_ECHO and c.address == RADAR_UDS and len(d) >= 3 and d[0] == 2 and d[1] in (0x10, 0x3E):
           self.echo["uds"] += 1
@@ -356,11 +360,11 @@ class Scan:
             self.note("cruise ENGAGED (car)" if cruise else "cruise DROPPED (car)")
             if not cruise and self.last_switch is not None and self.t - self.last_switch[0] <= SWITCH_WINDOW_S:
               self.cruise_drops_after_switch.append((self.t, self.last_switch[1], self.t - self.last_switch[0]))
-    self.update_masters()
+      self.update_masters()   # liveness only on CAN packets, on the CAN clock
 
   def update_masters(self):
-    stock_alive = self.t - self.stock_last < ALIVE_S
-    op_active = self.t - self.op_last < ALIVE_S
+    stock_alive = self.tc - self.stock_last < ALIVE_S
+    op_active = self.tc - self.op_last < ALIVE_S
     if stock_alive != self.stock_alive:
       self.stock_alive = stock_alive
       if not stock_alive:
@@ -379,7 +383,8 @@ class Scan:
     if op_active != self.op_active:
       self.op_active = op_active
       if op_active:
-        self.note(f"openpilot replacement frames START (stock last seen {self.t - self.stock_last:.2f} s ago, stock cmd was {self.stock_cmd})")
+        seen = f"{self.t - self.stock_last:.2f} s ago" if self.stock_last > -1e8 else "never"
+        self.note(f"openpilot replacement frames START (stock last seen {seen}, stock cmd was {self.stock_cmd})")
         if self.pending_request and "silence" in self.pending_request[1]:
           self.takeovers.append((self.t, self.v, self.t - self.pending_request[0], self.stock_cmd))
           self.last_switch = (self.t, "takeover")
