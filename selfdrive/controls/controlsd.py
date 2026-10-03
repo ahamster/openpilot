@@ -14,7 +14,7 @@ from panda import ALTERNATIVE_EXPERIENCE
 from system.swaglog import cloudlog
 from system.version import is_release_branch, get_short_branch
 from selfdrive.boardd.boardd import can_list_to_can_capnp
-from selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can, get_ti
+from selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
 from selfdrive.controls.lib.lateral_planner import CAMERA_OFFSET
 from selfdrive.controls.lib.drive_helpers import VCruiseHelper, get_lag_adjusted_curvature
 from selfdrive.controls.lib.latcontrol import LatControl
@@ -345,12 +345,9 @@ class Controls:
 
       if pandaState.torqueInterceptorDetected and not self.ti_ready:
         self.ti_ready = True
-        #Update CP based on torque_interceptor_ready
-        self.CP = get_ti()
-        # get_ti() re-runs get_params(), which returns a fresh CarParams with
-        # enableTorqueInterceptor=False and alternativeExperience=0. Re-apply both.
+        # Mutate in place: self.CP is self.CI.CP is self.CI.CS.CP (same object from get_car).
+        # Replacing it via get_ti() orphans CI/CS, body parser is never built, TI cmd stays 0.
         self.CP.enableTorqueInterceptor = True
-        self.CP.alternativeExperience = self.alternative_experience
 
     # Handle HW and system malfunctions
     # Order is very intentional here. Be careful when modifying this.

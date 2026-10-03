@@ -22,9 +22,7 @@ class CarInterface(CarInterfaceBase):
 
     ret.dashcamOnly = False # candidate not in (CAR.CX5_2022, CAR.CX9_2021)
 
-    #ret.enableTorqueInterceptor = 0x24A in fingerprint[0]
-    #if ret.enableTorqueInterceptor:
-    #  print("Recieving torque interceptor signal.")
+    ret.enableTorqueInterceptor = 0x24A in fingerprint.get(0, {})
 
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.8
