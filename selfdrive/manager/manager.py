@@ -90,7 +90,7 @@ def manager_init() -> None:
   # mirrors FrogPilot's KonikDongleId handling in frogpilot_boot_functions)
   if "konik" in os.getenv("API_HOST", ""):
     konik_id = params.get("KonikDongleId", encoding="utf8")
-    if konik_id is None:
+    if konik_id in (None, UNREGISTERED_DONGLE_ID):
       konik_id = register(show_spinner=True, register_konik=True)
       params.put("KonikDongleId", konik_id)
     params.put("DongleId", konik_id)
