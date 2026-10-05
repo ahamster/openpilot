@@ -166,14 +166,11 @@ class CarController(CarControllerBase):
                                                       CS.out.steeringTorque, self.ccp)
       if self.CP.flags & MazdaSafetyFlags.TORQUE_INTERCEPTOR:
         if CS.ti_lkas_allowed:
-          # MoreTore's StarPilot-dev (fe00f46 "fix ti command"): the Torque Interceptor is sent the
-          # stock LKAS command itself -- same 800-count scale, same 10/25 ramps and driver backoff,
-          # limited against the stock channel's last output. So it is never ramped on its own: when
-          # the TI comes back from DRIVER_OVER or a ramp-down it resumes at the stock command instead
-          # of climbing from zero. TI_STEER_* in CarControllerParams are unused, as in his build.
-          ti_new_torque = int(round(CC.actuators.torque * self.ccp.STEER_MAX))
-          ti_apply_torque = apply_driver_steer_torque_limits(ti_new_torque, self.apply_torque_last,
-                                                    CS.out.steeringTorque, self.ccp)
+          # TI has its own (lower) ceiling: sustained ~800 trips VIOL 17 -> OFF cutout.
+          # Scale to TI_STEER_MAX (600) and limit with TI_LIMITS on TI history.
+          ti_new_torque = int(round(CC.actuators.torque * self.ccp.TI_STEER_MAX))
+          ti_apply_torque = apply_driver_steer_torque_limits(ti_new_torque, self.ti_apply_torque_last,
+                                                    CS.out.steeringTorque, self.ccp.TI_LIMITS)
 
     self.apply_torque_last = apply_torque
     self.ti_apply_torque_last = ti_apply_torque

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import IntFlag
+from types import SimpleNamespace
 
 from opendbc.car import DT_CTRL, Bus, CarSpecs, DbcDict, PlatformConfig, Platforms
 from opendbc.car.common.conversions import Conversions as CV
@@ -37,13 +38,25 @@ class CarControllerParams:
       self.STEER_DRIVER_FACTOR = 1         # from dbc
       self.STEER_ERROR_MAX = 350           # max delta between torque cmd and torque motor
 
-      self.TI_STEER_MAX = 600                # theoretical max_steer 2047
+      self.TI_STEER_MAX = 600                # TI firmware trips VIOL 17 (over-torque -> momentary OFF) above ~600 sustained
       self.TI_STEER_DELTA_UP = 6             # torque increase per refresh
       self.TI_STEER_DELTA_DOWN = 15           # torque decrease per refresh
       self.TI_STEER_DRIVER_ALLOWANCE = 15    # allowed driver torque before start limiting
       self.TI_STEER_DRIVER_MULTIPLIER = 40     # weight driver torque
       self.TI_STEER_DRIVER_FACTOR = 1         # from dbc
       self.TI_STEER_ERROR_MAX = 350           # max delta between torque cmd and torque motor
+
+      # View of the TI limits under the names apply_driver_steer_torque_limits() expects, so the
+      # TI path rate/driver-limits with its own values instead of the LKAS ones.
+      self.TI_LIMITS = SimpleNamespace(
+        STEER_MAX=self.TI_STEER_MAX,
+        STEER_DELTA_UP=self.TI_STEER_DELTA_UP,
+        STEER_DELTA_DOWN=self.TI_STEER_DELTA_DOWN,
+        STEER_DRIVER_ALLOWANCE=self.TI_STEER_DRIVER_ALLOWANCE,
+        STEER_DRIVER_MULTIPLIER=self.TI_STEER_DRIVER_MULTIPLIER,
+        STEER_DRIVER_FACTOR=self.TI_STEER_DRIVER_FACTOR,
+        STEER_ERROR_MAX=self.TI_STEER_ERROR_MAX,
+      )
     if CP.flags & (MazdaSafetyFlags.GEN2 | MazdaSafetyFlags.GEN3):
       self.STEER_MAX = 8000
       self.STEER_DELTA_UP = 45              # torque increase per refresh
