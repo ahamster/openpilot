@@ -153,7 +153,15 @@ class Parser:
     # using parse_vision_outputs/parse_policy_outputs independently.
     self.parse_mdn('pose', outs, in_N=0, out_N=0, out_shape=(ModelConstants.POSE_WIDTH,))
     self.parse_mdn('wide_from_device_euler', outs, in_N=0, out_N=0, out_shape=(ModelConstants.WIDE_FROM_DEVICE_WIDTH,))
-    self.parse_mdn('road_transform', outs, in_N=0, out_N=0, out_shape=(ModelConstants.POSE_WIDTH,))
+    if 'road_transform' in outs:
+      self.parse_mdn('road_transform', outs, in_N=0, out_N=0, out_shape=(ModelConstants.POSE_WIDTH,))
+    else:
+      # 0.9.0-era weights predate this head (camera height above road).
+      # Report a fixed CX-5 estimate (~75% of 1.675 m vehicle height, cf. stock
+      # HEIGHT_INIT 1.22 m) as certain so calibration accepts it and keeps
+      # refining pitch/yaw; zeros here drove height to 0 and froze calibration.
+      outs['road_transform'] = np.array([[0., 0., 1.26, 0., 0., 0.]], dtype=np.float32)
+      outs['road_transform_stds'] = np.full((1, ModelConstants.POSE_WIDTH), 0.02, dtype=np.float32)
     self.split_outputs(outs)
     self.parse_categorical_crossentropy('desire_pred', outs, out_shape=(ModelConstants.DESIRE_PRED_LEN, ModelConstants.DESIRE_PRED_WIDTH))
     self.parse_binary_crossentropy('meta', outs)
