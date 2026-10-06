@@ -154,9 +154,20 @@ STATIC_DATA_366 = [0xFFF7FE7F, 0xFBFF3FC]
 static_data_list = [STATIC_DATA_361, STATIC_DATA_362, STATIC_DATA_363, STATIC_DATA_364, STATIC_DATA_365, STATIC_DATA_366]
 
 # GEN1 radar interceptor
-def create_radar_command(packer, frame, active, CS, hold):
+def create_radar_command(packer, frame, active, CS, hold, passthrough=False):
   #accel = 0
   ret = []
+  if passthrough:
+    # Verbatim relay: stock dictionaries straight back out. Same IDs/cadence,
+    # zero content step (CTR preserved). Used before FSC settles and whenever
+    # OP does not own longitudinal, so SBS/SCBS see genuine stock frames.
+    ret.append(packer.make_can_msg("CRZ_INFO", 0, dict(CS.crz_info)))
+    ret.append(packer.make_can_msg("CRZ_CTRL", 0, dict(CS.crz_cntr)))
+    if (frame % 10 == 0):
+      for addr in range(361,367):
+        addr_name = f"RADAR_{addr}"
+        ret.append(packer.make_can_msg(addr_name, 0, dict(CS.cp_cam.vl[addr_name])))
+    return ret
   crz_ctrl = CS.crz_cntr
   crz_info = CS.crz_info
 

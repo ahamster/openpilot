@@ -400,7 +400,11 @@ class CarController(CarControllerBase):
           CS.crz_info["ACCEL_CMD"] = acc_output
 
         if self.frame % 2 == 0:
-          can_sends.extend(mazdacan.create_radar_command(self.packer, self.frame, CC.longActive, CS, hold))
+          # Verbatim stock relay until FSC settles and only while OP owns
+          # longitudinal; otherwise forced/synthesized frames trip SCBS/SBS
+          # plausibility (stock 362 standstill 0xFFC vs computed angle, etc.).
+          passthrough = (not CS.fsc_settled) or (not CC.longActive)
+          can_sends.extend(mazdacan.create_radar_command(self.packer, self.frame, CC.longActive, CS, hold, passthrough))
 
     elif self.CP.flags & MazdaSafetyFlags.GEN2:
       if self.CP.openpilotLongitudinalControl:
