@@ -4,7 +4,10 @@ from numpy import clip
 def create_steering_control(packer, CP, frame, apply_torque, lkas, ti_apply_torque = None):
   msgs = []
   if CP.flags & MazdaSafetyFlags.GEN1:
-    if not CP.flags & MazdaSafetyFlags.NO_FSC:
+    # Stock FSC emits CAM_LKAS at ~16Hz; the 100Hz OP loop must not
+    # re-emit it faster (6x rate + CTR spin trips module supervision).
+    # TI channel stays every frame (TI box replies at 100Hz).
+    if not CP.flags & MazdaSafetyFlags.NO_FSC and frame % 6 == 0:
       tmp = apply_torque + 2048
 
       lo = tmp & 0xFF
@@ -28,7 +31,7 @@ def create_steering_control(packer, CP, frame, apply_torque, lkas, ti_apply_torq
       amd = (amd >> 4) | (( amd & 0xF) << 4)
       alo = (tmp & 0x3) << 2
 
-      ctr = frame % 16
+      ctr = (frame // 6) % 16  # own cadence: 16Hz stock rate, not the 100Hz loop
       # bytes:     [    1  ] [ 2 ] [             3               ]  [           4         ]
       csum = 249 - ctr - hi - lo - (lnv << 3) - er1 - (ldw << 7) - ( er2 << 4) - (b1 << 5)
 
